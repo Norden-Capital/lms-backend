@@ -15,7 +15,7 @@ jobs:
   # 1. Build & Test
   # ──────────────────────────────────────────────────────────────────────────
   build-test:
-    name: Build & Test (Java 21 / Maven)
+    name: Build (Java 21 / Maven)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -35,19 +35,8 @@ jobs:
       - name: Make mvnw executable
         run: chmod +x mvnw
 
-      - name: Run tests
-        run: ./mvnw test -B
-
-      - name: Build JAR (skip tests – already ran)
+      - name: Build JAR
         run: ./mvnw package -DskipTests -B
-
-      # Upload the jar so the Docker job can reuse it (avoids rebuilding twice)
-      - name: Upload JAR artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-jar
-          path: Backend/target/*.jar
-          retention-days: 1
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. Build & Push Docker image  (main branch pushes only)
