@@ -1,132 +1,102 @@
 package org.example.backend.controller;
 
-import org.example.backend.dto.AuthDto.*;
-import org.example.backend.entity.User;
-import org.example.backend.repository.UserRepository;
-import org.example.backend.service.JwtService;
-import org.example.backend.service.TwoFactorAuthService;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
+import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import org.example.backend.dto.*;
+import org.example.backend.security.AuthPrincipal;
+import org.example.backend.service.AuthService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/auth")
+@Tag(name = "Authentication", description = "Registration, login and two-factor authentication")
 public class AuthController {
 
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final TwoFactorAuthService twoFactorAuthService;
-    private final JwtService jwtService;
+    private final AuthService authService;
 
-    public AuthController(UserRepository userRepository,
-                          PasswordEncoder passwordEncoder,
-                          TwoFactorAuthService twoFactorAuthService,
-                          JwtService jwtService) {
-        this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
-        this.twoFactorAuthService = twoFactorAuthService;
-        this.jwtService = jwtService;
+    public AuthController(AuthService authService) {
+        this.authService = authService;
     }
 
+    // ── Anonymous ───────────────────────────────────────────────────────────
+
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody RegisterRequest request) {
-        if (userRepository.existsByEmail(request.getEmail())) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Email is already in use.");
-        }
-
-        String mfaSecret = request.isEnable2fa() ? twoFactorAuthService.generateSecret() : null;
-
-        User user = User.builder()
-                .firstName(request.getFirstName())
-                .lastName(request.getLastName())
-                .phone(request.getPhone())
-                .email(request.getEmail())
-                .password(passwordEncoder.encode(request.getPassword()))
-                .mfaEnabled(request.isEnable2fa())
-                .mfaSecret(mfaSecret)
-                .build();
-
-        userRepository.save(user);
-
-        UserDto userDto = mapToUserDto(user);
-
-        if (request.isEnable2fa()) {
-            MfaSetupResponse mfaSetup = new MfaSetupResponse();
-            mfaSetup.setSecret(mfaSecret);
-            mfaSetup.setQrCodeImage(twoFactorAuthService.generateQrCodeDataUrl(mfaSecret, user.getEmail()));
-            return ResponseEntity.ok(mfaSetup);
-        }
-
-        String token = jwtService.generateToken(user.getEmail());
-        return ResponseEntity.ok(new AuthResponse(token, false, "Registration successful", userDto));
+    @SecurityRequirements   // no token needed
+    @Operation(summary = "Create an account",
+               description = "New accounts always receive the MEMBER role. Changing a role is an admin action.")
+    public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
     }
 
     @PostMapping("/login")
-    public ResponseEntity<?> login(@RequestBody LoginRequest request) {
-        User user = userRepository.findByEmail(request.getEmail())
-                .orElse(null);
+    @SecurityRequirements
+    @Operation(summary = "Log in with email and password",
+               description = """
+                       Returns an access token straight away when 2FA is off.
 
-        if (user == null || !passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid email or password.");
-        }
-
-        if (user.isMfaEnabled()) {
-            if (request.getTotpCode() == null || request.getTotpCode().isEmpty()) {
-                return ResponseEntity.ok(new AuthResponse(null, true, "2FA TOTP code required.", mapToUserDto(user)));
-            }
-            if (!twoFactorAuthService.isCodeValid(user.getMfaSecret(), request.getTotpCode())) {
-                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid 2FA code.");
-            }
-        }
-
-        String token = jwtService.generateToken(user.getEmail());
-        return ResponseEntity.ok(new AuthResponse(token, false, "Login successful", mapToUserDto(user)));
+                       When 2FA is on it returns `mfaRequired: true` and a short-lived `mfaToken`
+                       instead — no access token and no user details. Send that token to
+                       `/api/auth/login/2fa` with the 6-digit code to finish.""")
+    public ResponseEntity<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
+        return ResponseEntity.ok(authService.login(request));
     }
+
+    @PostMapping("/login/2fa")
+    @SecurityRequirements
+    @Operation(summary = "Finish logging in with a second factor",
+               description = "Send either the 6-digit `code` from the authenticator app, or a `recoveryCode`.")
+    public ResponseEntity<LoginResponse> loginTwoFactor(@Valid @RequestBody LoginTwoFactorRequest request) {
+        return ResponseEntity.ok(authService.loginTwoFactor(request));
+    }
+
+    // ── Authenticated: managing your own second factor ──────────────────────
 
     @PostMapping("/2fa/setup")
-    public ResponseEntity<?> setup2fa(@RequestParam String email) {
-        User user = userRepository.findByEmail(email).orElse(null);
-        if (user == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found.");
-        }
+    @SecurityRequirement(name = "BearerAuth")
+    @Operation(summary = "Begin two-factor enrolment",
+               description = """
+                       Returns a secret and a QR code for the **logged-in user only** — it takes no
+                       email parameter, so it cannot be used to enrol somebody else.
 
-        String secret = twoFactorAuthService.generateSecret();
-        user.setMfaSecret(secret);
-        userRepository.save(user);
-
-        MfaSetupResponse response = new MfaSetupResponse();
-        response.setSecret(secret);
-        response.setQrCodeImage(twoFactorAuthService.generateQrCodeDataUrl(secret, user.getEmail()));
-
-        return ResponseEntity.ok(response);
+                       This does not switch 2FA on. Nothing changes until `/2fa/confirm` succeeds.""")
+    public ResponseEntity<MfaSetupResponse> setupMfa(@AuthenticationPrincipal AuthPrincipal principal) {
+        return ResponseEntity.ok(authService.startMfaSetup(principal.userId()));
     }
 
-    @PostMapping("/2fa/verify")
-    public ResponseEntity<?> verify2fa(@RequestBody Verify2FaRequest request) {
-        User user = userRepository.findByEmail(request.getEmail()).orElse(null);
-        if (user == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("User not found.");
-        }
-
-        if (twoFactorAuthService.isCodeValid(user.getMfaSecret(), request.getCode())) {
-            user.setMfaEnabled(true);
-            userRepository.save(user);
-            String token = jwtService.generateToken(user.getEmail());
-            return ResponseEntity.ok(new AuthResponse(token, false, "2FA successfully enabled!", mapToUserDto(user)));
-        }
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid 2FA verification code.");
+    @PostMapping("/2fa/confirm")
+    @SecurityRequirement(name = "BearerAuth")
+    @Operation(summary = "Confirm enrolment and switch 2FA on",
+               description = "Returns recovery codes. They are shown once and never retrievable again.")
+    public ResponseEntity<MfaConfirmResponse> confirmMfa(@AuthenticationPrincipal AuthPrincipal principal,
+                                                         @Valid @RequestBody MfaConfirmRequest request) {
+        return ResponseEntity.ok(authService.confirmMfaSetup(principal.userId(), request));
     }
 
-    private UserDto mapToUserDto(User user) {
-        UserDto dto = new UserDto();
-        dto.setId(user.getId());
-        dto.setFirstName(user.getFirstName());
-        dto.setLastName(user.getLastName());
-        dto.setPhone(user.getPhone());
-        dto.setEmail(user.getEmail());
-        dto.setMfaEnabled(user.isMfaEnabled());
-        return dto;
+    @PostMapping("/2fa/disable")
+    @SecurityRequirement(name = "BearerAuth")
+    @Operation(summary = "Turn two-factor authentication off",
+               description = "Requires the current password — being logged in is not enough on its own.")
+    public ResponseEntity<MessageResponse> disableMfa(@AuthenticationPrincipal AuthPrincipal principal,
+                                                      @Valid @RequestBody PasswordConfirmRequest request) {
+        return ResponseEntity.ok(authService.disableMfa(principal.userId(), request));
+    }
+
+    @PostMapping("/2fa/recovery-codes")
+    @SecurityRequirement(name = "BearerAuth")
+    @Operation(summary = "Issue a fresh set of recovery codes",
+               description = "Every previously issued code stops working immediately.")
+    public ResponseEntity<MfaConfirmResponse> regenerateRecoveryCodes(
+            @AuthenticationPrincipal AuthPrincipal principal,
+            @Valid @RequestBody PasswordConfirmRequest request) {
+        return ResponseEntity.ok(authService.regenerateRecoveryCodes(principal.userId(), request));
     }
 }

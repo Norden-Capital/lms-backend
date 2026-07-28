@@ -7,8 +7,11 @@ services:
       POSTGRES_DB: lmsdb
       POSTGRES_USER: lmsuser
       POSTGRES_PASSWORD: lmspassword123
-    ports:
-      - "5432:5432"
+    # No "ports" on purpose. The backend container reaches this database over the
+    # internal compose network as db:5432, so publishing 5432 to the host would
+    # only expose Postgres to the public internet without the backend gaining
+    # anything. Local development adds the port back in docker-compose.override.yml,
+    # bound to 127.0.0.1, because Maven runs on the host rather than in a container.
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
