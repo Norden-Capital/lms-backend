@@ -1,0 +1,21 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# IDE
+.idea
+*.iml
+*.iws
+*.ipr
+
+# Maven build output (Docker builds fresh inside container)
+target/
+!target/*.jar
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md
