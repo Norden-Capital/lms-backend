@@ -9,16 +9,10 @@ import java.util.Map;
 @RestController
 public class HealthController {
 
-    // Redirect root / → Swagger UI
+    // Redirect root / → Swagger UI (served at /api/docs, see application.properties)
     @GetMapping("/")
     public RedirectView redirectRoot() {
-        return new RedirectView("/swagger-ui/index.html");
-    }
-
-    // Redirect /api/docs → Swagger UI
-    @GetMapping("/api/docs")
-    public RedirectView redirectApiDocs() {
-        return new RedirectView("/swagger-ui/index.html");
+        return new RedirectView("/api/docs");
     }
 
     @GetMapping("/health")
