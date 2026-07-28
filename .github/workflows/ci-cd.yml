@@ -101,9 +101,12 @@ jobs:
           script: |
             set -e
 
+            # Login to GHCR to pull private package
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
             cd /opt/myapp
 
-            # Pull the new image and recreate the container (public image – no login needed)
+            # Pull the new image and recreate the container
             docker compose pull backend
             docker compose up -d --no-deps backend
 
