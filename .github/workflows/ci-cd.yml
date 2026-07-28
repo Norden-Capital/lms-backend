@@ -21,6 +21,23 @@ jobs:
       run:
         working-directory: ./Backend
 
+    # A throwaway Postgres for the test run. Flyway builds the schema into it
+    # from the migrations, which also proves the migrations themselves apply.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: lmsdb_test
+          POSTGRES_USER: lmsuser
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U lmsuser -d lmsdb_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -37,6 +54,18 @@ jobs:
 
       - name: Build JAR
         run: ./mvnw package -DskipTests -B
+
+      # Tests were skipped originally because there was no database in CI.
+      # The service container above supplies one, so they can run for real.
+      # Keep this step: a compile-only pipeline cannot catch a broken login.
+      - name: Run tests
+        run: ./mvnw test -B
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/lmsdb_test
+          SPRING_DATASOURCE_USERNAME: lmsuser
+          SPRING_DATASOURCE_PASSWORD: ci-only-password
+          JWT_SECRET: ci-only-jwt-secret-at-least-32-characters-long
+          ENCRYPTION_KEY: ci-only-encryption-key
 
   # ──────────────────────────────────────────────────────────────────────────
   # 2. Build & Push Docker image  (main branch pushes only)
@@ -106,17 +135,37 @@ jobs:
 
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
+          envs: JWT_SECRET,ENCRYPTION_KEY,POSTGRES_PASSWORD
           script: |
             set -e
 
+            cd /opt/myapp
+
+            # Fail before touching anything if a secret is missing. Booting
+            # without these produces an app that looks healthy and quietly
+            # invalidates every token and MFA secret on the next restart.
+            [ -n "$JWT_SECRET" ]        || { echo "::error::JWT_SECRET is empty — add it under Settings > Secrets > Actions"; exit 1; }
+            [ -n "$ENCRYPTION_KEY" ]    || { echo "::error::ENCRYPTION_KEY is empty — add it under Settings > Secrets > Actions"; exit 1; }
+            [ -n "$POSTGRES_PASSWORD" ] || { echo "::error::POSTGRES_PASSWORD is empty — add it under Settings > Secrets > Actions"; exit 1; }
+
+            # docker compose reads this automatically from the working directory.
+            umask 077
+            cat > .env <<EOF
+            JWT_SECRET=${JWT_SECRET}
+            ENCRYPTION_KEY=${ENCRYPTION_KEY}
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            EOF
+
             # Login to GHCR to pull private package
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-
-            cd /opt/myapp
 
             # Pull the new image and start both backend and postgres
             docker compose pull
@@ -125,4 +174,19 @@ jobs:
             # Remove dangling images to keep disk clean
             docker image prune -f
 
-            echo "✅ Deployment complete – $(date)"
+            # The deploy is not finished until the app answers. Without this the
+            # job prints a tick even when the container never started, which is
+            # exactly how the backend sat down unnoticed.
+            echo "Waiting for the backend to report healthy..."
+            for attempt in $(seq 1 30); do
+              if curl -fsS http://localhost:8080/health > /dev/null 2>&1; then
+                echo "✅ Deployment complete and healthy – $(date)"
+                exit 0
+              fi
+              sleep 5
+            done
+
+            echo "::error::Backend did not become healthy within 150s"
+            docker compose ps
+            docker compose logs --tail 120 backend
+            exit 1

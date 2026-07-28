@@ -6,7 +6,10 @@ services:
     environment:
       POSTGRES_DB: lmsdb
       POSTGRES_USER: lmsuser
-      POSTGRES_PASSWORD: lmspassword123
+      # The fallback exists so local development works with no setup. On the VPS
+      # the deploy writes /opt/myapp/.env, and that value wins. Never let the
+      # fallback be what production actually runs on.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lmspassword123}
     # No "ports" on purpose. The backend container reaches this database over the
     # internal compose network as db:5432, so publishing 5432 to the host would
     # only expose Postgres to the public internet without the backend gaining
@@ -27,11 +30,20 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - SPRING_PROFILES_ACTIVE=prod
       - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/lmsdb
       - SPRING_DATASOURCE_USERNAME=lmsuser
-      - SPRING_DATASOURCE_PASSWORD=lmspassword123
-      - SPRING_JPA_HIBERNATE_DDL_AUTO=update
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-lmspassword123}
+
+      # SPRING_JPA_HIBERNATE_DDL_AUTO is deliberately absent. Environment
+      # variables override application.properties, so setting it here would put
+      # Hibernate back in charge of the schema and undo `ddl-auto=validate`,
+      # which exists so Flyway owns migrations alone.
+
+      # Unset means the application invents a random key at every boot: all
+      # tokens die on restart, and any stored MFA secret becomes permanently
+      # undecryptable. The deploy job refuses to continue if these are empty.
+      - JWT_SECRET=${JWT_SECRET:-}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
     depends_on:
       db:
         condition: service_healthy
