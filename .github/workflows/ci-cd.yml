@@ -92,6 +92,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose.yml to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "docker-compose.yml"
+          target: "/opt/myapp"
+
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -106,9 +118,9 @@ jobs:
 
             cd /opt/myapp
 
-            # Pull the new image and recreate the container
-            docker compose pull backend
-            docker compose up -d --no-deps backend
+            # Pull the new image and start both backend and postgres
+            docker compose pull
+            docker compose up -d
 
             # Remove dangling images to keep disk clean
             docker image prune -f
