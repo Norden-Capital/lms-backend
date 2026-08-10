@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -57,6 +58,35 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST.value(),
                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
                 "The request body could not be read as JSON.",
+                request.getRequestURI()));
+    }
+
+    /**
+     * A caller who is authenticated but not allowed.
+     *
+     * <p>This handler has to exist. {@code @PreAuthorize} throws
+     * {@code AuthorizationDeniedException} from inside the controller invocation,
+     * which is downstream of the filter chain that would normally translate it
+     * into a 403. Without an entry here the catch-all below claims it instead, and
+     * every authorisation failure in the application answers 500 — indistinguishable
+     * from a crash, to the frontend and to whoever is debugging it.
+     *
+     * <p>{@code AuthorizationDeniedException} extends {@code AccessDeniedException},
+     * so matching the parent covers both the annotation and the filter chain.
+     *
+     * <p>Logged at debug, not error: being refused is the system working.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    public ResponseEntity<ErrorResponse> handleAccessDenied(AccessDeniedException ex,
+                                                            HttpServletRequest request) {
+        log.debug("Access denied on {} {}", request.getMethod(), request.getRequestURI());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ErrorResponse.of(
+                HttpStatus.FORBIDDEN.value(),
+                HttpStatus.FORBIDDEN.getReasonPhrase(),
+                // Deliberately says nothing about which permission is missing —
+                // that would map out the permission model for anyone probing.
+                "You do not have permission to do that.",
                 request.getRequestURI()));
     }
 

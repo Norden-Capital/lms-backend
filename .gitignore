@@ -1,0 +1,3 @@
+# Local secrets. Mirrors what the CI deploy writes to /opt/myapp/.env on the VPS,
+# so local runs behave the same way production does. Never commit this.
+.env

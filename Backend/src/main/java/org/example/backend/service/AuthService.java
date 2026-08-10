@@ -261,6 +261,49 @@ public class AuthService {
         return new MessageResponse("Two-factor authentication has been disabled.");
     }
 
+    /**
+     * Clears another user's second factor so they can enrol again on a new device.
+     *
+     * <p>This is the only way back for someone who has lost both their phone and
+     * their recovery codes. Two-factor is mandatory and cannot be switched off by
+     * the person who holds it, so without an endpoint like this a single broken
+     * phone makes an account permanently unreachable.
+     *
+     * <p>Refuses to act on the caller's own account on purpose. Resetting
+     * yourself is self-disable wearing a different hat, and self-disable is
+     * precisely what the mandatory-2FA policy forbids — an admin could otherwise
+     * strip their own second factor at will.
+     *
+     * <p>Note what this hands over: until the user enrols again, their password
+     * alone gets into the account. That is why it takes USER:UPDATE and why the
+     * log line below is deliberately loud.
+     */
+    @Transactional
+    public MessageResponse resetMfaFor(Long targetUserId, Long actingUserId) {
+        if (targetUserId.equals(actingUserId)) {
+            throw ApiException.forbidden(
+                    "You cannot reset your own two-factor authentication. Ask another administrator.");
+        }
+
+        User target = requireUser(targetUserId);
+
+        if (!target.isMfaEnabled() && target.getMfaSecret() == null) {
+            throw ApiException.conflict("Two-factor authentication is not set up for this account.");
+        }
+
+        target.setMfaEnabled(false);
+        target.setMfaSecret(null);
+        target.setMfaConfirmedAt(null);
+        userRepository.save(target);
+        recoveryCodeRepository.deleteByUserId(target.getId());
+
+        log.warn("2FA RESET: user id={} ({}) had their second factor cleared by admin id={}",
+                target.getId(), target.getEmail(), actingUserId);
+
+        return new MessageResponse(
+                target.fullName() + " can sign in with their password alone until they enrol again.");
+    }
+
     /** Replaces every existing code, so a leaked list stops working immediately. */
     @Transactional
     public MfaConfirmResponse regenerateRecoveryCodes(Long userId, PasswordConfirmRequest request) {
