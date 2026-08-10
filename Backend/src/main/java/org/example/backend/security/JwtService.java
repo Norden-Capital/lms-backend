@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Issues and reads the two kinds of token this system uses.
+ * Issues and reads the three kinds of token this system uses.
  *
  * <p><b>Access tokens</b> are the real thing — they carry the user's identity,
  * role and full permission list, so every subsequent request is authorised
@@ -29,6 +29,13 @@ import java.util.Set;
  * account has 2FA switched on. They are short-lived and grant no access at all;
  * their only purpose is to prove "this person already passed the password step"
  * so the second step cannot be called on its own.
+ *
+ * <p><b>Enrolment-pending tokens</b> are issued after a correct password when the
+ * account has <em>not</em> set 2FA up. Two-factor is mandatory for every role, so
+ * this is the normal outcome for anyone who has not enrolled yet. It deliberately
+ * carries no permissions: the holder can look up who they are and complete
+ * enrolment, and nothing else. {@code /2fa/confirm} exchanges it for a real
+ * access token.
  */
 @Service
 public class JwtService {
@@ -42,6 +49,7 @@ public class JwtService {
 
     public static final String TYPE_ACCESS = "access";
     public static final String TYPE_MFA_PENDING = "mfa_pending";
+    public static final String TYPE_ENROLMENT_PENDING = "enrolment_pending";
 
     private final SecretKey key;
     private final Duration accessTokenTtl;
@@ -105,6 +113,33 @@ public class JwtService {
                 .claim(CLAIM_USER_ID, user.getId())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(mfaTokenTtl)))
+                .signWith(key)
+                .compact();
+    }
+
+    /**
+     * Issued after a correct password when the account has no second factor yet.
+     *
+     * <p>Note what is missing: {@code perms}. Authorisation reads permissions
+     * straight out of the token, so an empty list is not a hint — it is the
+     * absence of any right to do anything. What this token <em>can</em> reach is
+     * decided by an explicit allowlist in {@code SecurityConfig}, not by anything
+     * written here.
+     *
+     * <p>Given the full access lifetime rather than the short MFA one: enrolling
+     * means installing an app and scanning a code, and having the token expire
+     * halfway through would drop someone back at the login screen with nothing to
+     * show for it. It is close to powerless, so a long life costs little.
+     */
+    public String generateEnrolmentPendingToken(User user) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(user.getEmail())
+                .claim(CLAIM_TYPE, TYPE_ENROLMENT_PENDING)
+                .claim(CLAIM_USER_ID, user.getId())
+                .claim(CLAIM_ROLE, user.getRole().getName())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(accessTokenTtl)))
                 .signWith(key)
                 .compact();
     }

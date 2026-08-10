@@ -145,7 +145,28 @@ public class AuthService {
             return LoginResponse.mfaRequired(jwtService.generateMfaPendingToken(user));
         }
 
-        return completeLogin(user);
+        // Password was right, but there is no second factor on this account.
+        //
+        // Two-factor is mandatory for every role, so this is not a normal login —
+        // it is a login that cannot go anywhere until enrolment is done. The token
+        // handed back carries no permissions, and SecurityConfig lets it reach
+        // only the enrolment endpoints.
+        //
+        // The gate lives here, in the token, rather than in the frontend, because
+        // the frontend is not what the API asks. Hiding buttons stops nobody with
+        // a terminal.
+        user.setLastLoginAt(Instant.now());
+        user.setFailedLoginAttempts(0);
+        user.setLockedUntil(null);
+        userRepository.save(user);
+
+        // No permissions passed to UserResponse: what this person can currently do
+        // is nothing, and saying otherwise would have the frontend render an app
+        // whose every button returns 403.
+        return LoginResponse.enrolmentRequired(
+                jwtService.generateEnrolmentPendingToken(user),
+                jwtService.getAccessTokenTtl().toSeconds(),
+                UserResponse.from(user, Set.of()));
     }
 
     // ── Login, step two: the second factor ──────────────────────────────────
@@ -233,32 +254,43 @@ public class AuthService {
         List<String> recoveryCodes = issueRecoveryCodes(user);
         log.info("Enabled 2FA for user id={}", user.getId());
 
-        return new MfaConfirmResponse(
+        // The moment the gate opens. Up to this line the caller has been holding an
+        // enrolment-pending token, authorised for nothing but this flow. Handing
+        // back a real access token here is what turns "you may only enrol" into
+        // "you may work" — without it they finish enrolling and stay locked out,
+        // because the token they already hold cannot be changed after issue.
+        Set<String> permissions = permissionService.effectivePermissionsFor(user);
+
+        return MfaConfirmResponse.enrolled(
                 "Two-factor authentication is now enabled. Save these recovery codes somewhere safe — "
                         + "they are shown once and are the only way back in if you lose your phone.",
-                recoveryCodes);
+                recoveryCodes,
+                jwtService.generateAccessToken(user, permissions),
+                jwtService.getAccessTokenTtl().toSeconds());
     }
 
-    /** Switching 2FA off re-checks the password: being logged in is not sufficient. */
+    /**
+     * Refuses. Always.
+     *
+     * <p>Two-factor is mandatory for every role, so there is no such thing as
+     * legitimately switching it off for yourself. The endpoint is kept rather than
+     * deleted so that anything still calling it gets a clear answer instead of a
+     * 404 that reads like a bug — and so this decision stays visible in the code
+     * rather than only in a document nobody opens.
+     *
+     * <p>The real way back for someone who has lost their phone <em>and</em> their
+     * recovery codes is {@link #resetMfaFor}, which another administrator performs
+     * on their behalf. Deliberately not something you can do to yourself: an admin
+     * able to reset their own second factor would be able to disable it, which is
+     * exactly what this refusal exists to prevent.
+     */
     @Transactional
     public MessageResponse disableMfa(Long userId, PasswordConfirmRequest request) {
-        User user = requireUser(userId);
+        log.warn("Rejected an attempt to disable 2FA for user id={}", userId);
 
-        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            throw ApiException.unauthorized("That password is not correct.");
-        }
-        if (!user.isMfaEnabled()) {
-            throw ApiException.conflict("Two-factor authentication is not enabled.");
-        }
-
-        user.setMfaEnabled(false);
-        user.setMfaSecret(null);
-        user.setMfaConfirmedAt(null);
-        userRepository.save(user);
-        recoveryCodeRepository.deleteByUserId(user.getId());
-
-        log.info("Disabled 2FA for user id={}", user.getId());
-        return new MessageResponse("Two-factor authentication has been disabled.");
+        throw ApiException.forbidden(
+                "Two-factor authentication cannot be switched off. If you have lost access to your "
+                        + "device, ask an administrator to reset it for you.");
     }
 
     /**
@@ -316,7 +348,8 @@ public class AuthService {
             throw ApiException.conflict("Two-factor authentication is not enabled.");
         }
 
-        return new MfaConfirmResponse(
+        // No token here: this caller already holds a working one.
+        return MfaConfirmResponse.codesOnly(
                 "New recovery codes generated. Your previous codes no longer work.",
                 issueRecoveryCodes(user));
     }

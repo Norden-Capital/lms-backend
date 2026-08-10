@@ -74,8 +74,29 @@ public class SecurityConfig {
                             "/api/auth/password/forgot",
                             "/api/auth/password/reset").permitAll()
 
-                    // Everything else, including all of /api/auth/2fa/**.
-                    .anyRequest().authenticated())
+                    // ── The enrolment allowlist ──────────────────────────────
+                    // Reachable while still owing a second factor. Nothing here
+                    // reads or changes anything except the caller's own 2FA setup.
+                    //
+                    // Kept to three entries deliberately. Every addition widens
+                    // what someone can do before proving who they are twice.
+                    .requestMatchers(HttpMethod.GET, "/api/users/me").authenticated()
+                    .requestMatchers(HttpMethod.POST,
+                            "/api/auth/2fa/setup",
+                            "/api/auth/2fa/confirm").authenticated()
+
+                    // ── Everything else ──────────────────────────────────────
+                    // hasAuthority, not authenticated(). An enrolment-pending
+                    // token IS authenticated — that is how it reaches the three
+                    // routes above — so .authenticated() would wave it through
+                    // everywhere and the gate would be decoration.
+                    //
+                    // The property that matters: this fails closed. An endpoint
+                    // added next year is refused to un-enrolled users because
+                    // nobody did anything, rather than because someone remembered
+                    // to guard it. Opting out has to be deliberate and visible,
+                    // right here.
+                    .anyRequest().hasAuthority(JwtAuthenticationFilter.SESSION_FULL))
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();

@@ -27,6 +27,13 @@ import java.util.List;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /**
+     * Granted only to a token from a fully completed login. {@code SecurityConfig}
+     * demands it on everything except the handful of enrolment routes, which is
+     * what makes two-factor mandatory rather than merely encouraged.
+     */
+    public static final String SESSION_FULL = "SESSION:FULL";
+
     private final JwtService jwtService;
 
     public JwtAuthenticationFilter(JwtService jwtService) {
@@ -46,22 +53,46 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         try {
-            // parseAs rejects MFA-pending tokens here, so the half-finished login
-            // step can never be used as a credential for real endpoints.
-            Claims claims = jwtService.parseAs(header.substring(7), JwtService.TYPE_ACCESS);
+            Claims claims = jwtService.parse(header.substring(7));
+            String type = claims.get(JwtService.CLAIM_TYPE, String.class);
+
+            // MFA-pending tokens are refused here, so the half-finished login step
+            // can never be used as a credential for real endpoints. Only the two
+            // types below authenticate anything.
+            boolean isAccess = JwtService.TYPE_ACCESS.equals(type);
+            boolean isEnrolmentPending = JwtService.TYPE_ENROLMENT_PENDING.equals(type);
+            if (!isAccess && !isEnrolmentPending) {
+                throw new JwtException("Token type " + type + " cannot authenticate a request");
+            }
 
             List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
+            // Read outside the branch below: the principal carries it either way,
+            // so that "who am I" still answers correctly while enrolment is owed.
+            // Holding the role is not the same as being allowed to use it — the
+            // ROLE_ authority granting that is only added for access tokens.
             String role = claims.get(JwtService.CLAIM_ROLE, String.class);
-            if (role != null) {
-                // Spring's hasRole() looks for this prefix; hasAuthority() does not.
-                authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
-            }
 
-            List<?> permissions = claims.get(JwtService.CLAIM_PERMISSIONS, List.class);
-            if (permissions != null) {
-                permissions.forEach(p -> authorities.add(new SimpleGrantedAuthority(String.valueOf(p))));
+            if (isAccess) {
+                // The marker that separates a finished login from one still owing
+                // an enrolment. SecurityConfig requires it on every route that is
+                // not explicitly part of enrolling, so a new endpoint is closed to
+                // enrolment-pending holders by default rather than by remembering.
+                authorities.add(new SimpleGrantedAuthority(SESSION_FULL));
+
+                if (role != null) {
+                    // Spring's hasRole() looks for this prefix; hasAuthority() does not.
+                    authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
+                }
+
+                List<?> permissions = claims.get(JwtService.CLAIM_PERMISSIONS, List.class);
+                if (permissions != null) {
+                    permissions.forEach(p -> authorities.add(new SimpleGrantedAuthority(String.valueOf(p))));
+                }
             }
+            // An enrolment-pending token gets no authorities whatsoever — not even
+            // its role. It is authenticated, which is enough to reach the enrolment
+            // endpoints, and authorised for nothing.
 
             AuthPrincipal principal = new AuthPrincipal(
                     claims.get(JwtService.CLAIM_USER_ID, Number.class).longValue(),
