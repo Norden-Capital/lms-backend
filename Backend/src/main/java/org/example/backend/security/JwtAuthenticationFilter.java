@@ -6,6 +6,8 @@ import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.example.backend.entity.UserStatus;
+import org.example.backend.service.AccessService;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -16,13 +18,30 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Turns a {@code Bearer} access token into an authenticated request.
  *
- * <p>Permissions travel inside the token, so authorising a request costs no
- * database queries. The trade-off is that a permission change only takes effect
- * when the user's next token is issued.
+ * <p><b>The token says who you are. The database says what you may do.</b> That
+ * split is deliberate and it changed: permissions used to be read straight out of
+ * the token, which cost no queries but meant a permission taken away kept working
+ * until that token expired. An administrator unticking a box and being told
+ * "saved" while the person carried on deleting things for another hour is not a
+ * permission system, it is a suggestion.
+ *
+ * <p>So each request loads the account's current access through
+ * {@link AccessService}, which holds the answer for a few seconds. Three things
+ * are checked that a token alone could never notice:
+ *
+ * <ul>
+ *   <li><b>The account still exists.</b></li>
+ *   <li><b>It is still ACTIVE.</b> Deactivating somebody now signs them out on
+ *       their next request rather than whenever their token happens to run out.</li>
+ *   <li><b>The token was issued after their cut-off.</b> Resetting a password
+ *       bumps that cut-off, which is what finally lets a password reset end the
+ *       session an intruder is already inside.</li>
+ * </ul>
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -35,9 +54,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     public static final String SESSION_FULL = "SESSION:FULL";
 
     private final JwtService jwtService;
+    private final AccessService accessService;
 
-    public JwtAuthenticationFilter(JwtService jwtService) {
+    public JwtAuthenticationFilter(JwtService jwtService, AccessService accessService) {
         this.jwtService = jwtService;
+        this.accessService = accessService;
     }
 
     @Override
@@ -65,13 +86,30 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 throw new JwtException("Token type " + type + " cannot authenticate a request");
             }
 
+            Long userId = claims.get(JwtService.CLAIM_USER_ID, Number.class).longValue();
+
+            Optional<AccessService.Snapshot> found = accessService.snapshotOf(userId);
+            if (found.isEmpty()) {
+                // A valid signature for an account that is no longer there.
+                throw new JwtException("No account for user id " + userId);
+            }
+
+            AccessService.Snapshot access = found.get();
+
+            if (!access.accepts(claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant())) {
+                throw new JwtException("Token predates this account's cut-off");
+            }
+
+            if (access.status() != UserStatus.ACTIVE) {
+                throw new JwtException("Account is " + access.status());
+            }
+
             List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
-            // Read outside the branch below: the principal carries it either way,
-            // so that "who am I" still answers correctly while enrolment is owed.
-            // Holding the role is not the same as being allowed to use it — the
-            // ROLE_ authority granting that is only added for access tokens.
-            String role = claims.get(JwtService.CLAIM_ROLE, String.class);
+            // The role comes from the database too, not from the token. Somebody
+            // demoted mid-session should stop being an administrator at once, and
+            // the token still claims they are one.
+            String role = access.role();
 
             if (isAccess) {
                 // The marker that separates a finished login from one still owing
@@ -80,22 +118,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // enrolment-pending holders by default rather than by remembering.
                 authorities.add(new SimpleGrantedAuthority(SESSION_FULL));
 
-                if (role != null) {
-                    // Spring's hasRole() looks for this prefix; hasAuthority() does not.
-                    authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
-                }
+                // Spring's hasRole() looks for this prefix; hasAuthority() does not.
+                authorities.add(new SimpleGrantedAuthority("ROLE_" + role));
 
-                List<?> permissions = claims.get(JwtService.CLAIM_PERMISSIONS, List.class);
-                if (permissions != null) {
-                    permissions.forEach(p -> authorities.add(new SimpleGrantedAuthority(String.valueOf(p))));
-                }
+                access.permissions()
+                        .forEach(p -> authorities.add(new SimpleGrantedAuthority(p)));
             }
             // An enrolment-pending token gets no authorities whatsoever — not even
             // its role. It is authenticated, which is enough to reach the enrolment
             // endpoints, and authorised for nothing.
 
             AuthPrincipal principal = new AuthPrincipal(
-                    claims.get(JwtService.CLAIM_USER_ID, Number.class).longValue(),
+                    userId,
                     claims.getSubject(),
                     role
             );
@@ -105,8 +139,9 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(authentication);
 
         } catch (JwtException | IllegalArgumentException | NullPointerException e) {
-            // Expired, tampered with, or the wrong kind of token. Leave the context
-            // empty and let the entry point return a clean 401.
+            // Expired, tampered with, revoked, or for an account that has since
+            // been switched off. Leave the context empty and let the entry point
+            // return a clean 401.
             SecurityContextHolder.clearContext();
         }
 

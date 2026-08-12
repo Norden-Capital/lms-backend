@@ -44,6 +44,15 @@ services:
       # undecryptable. The deploy job refuses to continue if these are empty.
       - JWT_SECRET=${JWT_SECRET:-}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-}
+
+      # The first administrator, created once on a database with no users in it
+      # and ignored forever after. There is deliberately no fallback: unset means
+      # no account is created, which is recoverable — a default password in a
+      # public repository is not.
+      - BOOTSTRAP_ADMIN_EMAIL=${BOOTSTRAP_ADMIN_EMAIL:-}
+      - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
+      - BOOTSTRAP_ADMIN_FIRST_NAME=${BOOTSTRAP_ADMIN_FIRST_NAME:-System}
+      - BOOTSTRAP_ADMIN_LAST_NAME=${BOOTSTRAP_ADMIN_LAST_NAME:-Administrator}
     depends_on:
       db:
         condition: service_healthy

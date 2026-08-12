@@ -94,6 +94,22 @@ public class User {
     @Builder.Default
     private Set<UserPermission> permissionOverrides = new LinkedHashSet<>();
 
+    /**
+     * Tokens issued before this instant are refused.
+     *
+     * <p>The answer to a problem tokens have by design: once handed out, nothing
+     * could take one back. Resetting somebody's password did not end the session
+     * an intruder was already inside, and deactivating an account did not sign
+     * that person out — both waited for the token to expire on its own.
+     *
+     * <p>Bumping this to now invalidates every session that account has
+     * anywhere, on the next request. Compared at second precision, since that is
+     * all a JWT's {@code iat} claim carries.
+     */
+    @Builder.Default
+    @Column(name = "tokens_valid_from", nullable = false)
+    private Instant tokensValidFrom = Instant.EPOCH;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 

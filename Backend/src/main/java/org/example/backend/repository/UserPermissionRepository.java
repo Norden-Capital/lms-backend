@@ -14,4 +14,15 @@ public interface UserPermissionRepository extends JpaRepository<UserPermission, 
      */
     @Query("SELECT up FROM UserPermission up JOIN FETCH up.permission WHERE up.user.id = :userId")
     List<UserPermission> findByUserIdWithPermission(Long userId);
+
+    /**
+     * Drops every per-person exception for one account.
+     *
+     * <p>Called when a role changes. An exception is stored as a difference from
+     * a role — "this Member also gets exports" — so once the role underneath it
+     * changes, the sentence no longer parses. Worse, a DENY that was written
+     * against an administrator survives a promotion and quietly takes the
+     * permission away again, which is a hole nobody would think to look for.
+     */
+    long deleteByUserId(Long userId);
 }
