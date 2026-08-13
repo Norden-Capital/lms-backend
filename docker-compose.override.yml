@@ -21,6 +21,17 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
 
+  # Same reason as the database above: on the VPS the backend is a container and
+  # reaches the proxy by service name, but locally Maven runs it on the host, so
+  # the port has to exist somewhere the host can see. 127.0.0.1 only — a Docker
+  # API reachable from the network is worse than no proxy at all.
+  #
+  # The Containers tab is empty until this is running:
+  #     docker compose up -d db docker-socket-proxy
+  docker-socket-proxy:
+    ports:
+      - "127.0.0.1:2375:2375"
+
   pgadmin:
     image: dpage/pgadmin4:8.14
     container_name: lms-pgadmin

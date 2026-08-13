@@ -45,8 +45,12 @@ public class SystemController {
 
                        Host CPU, memory, load and disk come from /proc, which Docker does not put
                        in a namespace — so these are the machine's real figures, not the
-                       container's. The exception is network, which IS namespaced: those counters
-                       are this container's traffic.
+                       container's. Network is the exception, and reads the host's counters
+                       through a mount; server.networkIsHost says whether that mount is present.
+
+                       Container figures come from a read-only Docker proxy, not the socket.
+                       containers.available is false when no proxy is reachable, and the list is
+                       then empty — which is not the same claim as "nothing is running".
 
                        Counters are cumulative where the underlying source is cumulative — network
                        bytes and request totals. Turning those into a rate means sampling this

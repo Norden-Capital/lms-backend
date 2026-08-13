@@ -13,6 +13,7 @@ import java.util.List;
  */
 public record SystemHealthResponse(
         Server server,
+        Containers containers,
         Backend backend,
         Database database
 ) {
@@ -23,13 +24,17 @@ public record SystemHealthResponse(
      * <p>Read from {@code /proc}, which — usefully — Docker does <em>not</em> put
      * in a namespace. The container therefore sees the host's real CPU, memory
      * and load with no mount and no privileges. The one exception is
-     * {@code /proc/net}, which <em>is</em> namespaced: those counters are this
-     * container's traffic, not the machine's.
+     * {@code /proc/net}, which <em>is</em> namespaced — see
+     * {@link #networkIsHost()}.
      *
      * @param cpuPercent      0–100 across all cores
      * @param memoryAvailable what is genuinely free — excludes the file cache,
      *                        which Linux counts as used and hands back on demand
      * @param uptimeSeconds   since the machine booted, not since the app started
+     * @param networkIsHost   whether the two counters above are the machine's or
+     *                        merely this container's. False is not a failure: it
+     *                        is what happens without the mount, and the screen
+     *                        says which one it is rather than guessing
      */
     public record Server(
             String os,
@@ -45,8 +50,54 @@ public record SystemHealthResponse(
             int processes,
             long uptimeSeconds,
             long networkIn,
-            long networkOut
+            long networkOut,
+            boolean networkIsHost
     ) {
+    }
+
+    /**
+     * The containers on the machine.
+     *
+     * <p>Docker is the only source for this, and talking to Docker means the
+     * socket — which is root on the host, handed to a web application. So the
+     * backend never touches it. A separate proxy holds the socket and republishes
+     * a GET-only slice of the API on the internal network; this reads that.
+     *
+     * <p>Absent rather than empty when there is no endpoint: an empty list would
+     * read as "no containers are running", which is a different and alarming
+     * claim. {@code detail} carries the reason so the screen can say it out loud.
+     */
+    public record Containers(
+            boolean available,
+            String detail,
+            List<Container> items
+    ) {
+        /**
+         * @param cpuPercent  0–100 against the whole machine, the same basis as
+         *                    {@code docker stats}
+         * @param memoryLimit the cap set on the container, or the machine's total
+         *                    when none is set — which is the case here
+         * @param networkIn   cumulative bytes since the container started, not a
+         *                    rate
+         * @param restarts    how many times Docker has restarted it. Climbing is
+         *                    the signal; the absolute number is not
+         */
+        public record Container(
+                String id,
+                String name,
+                String image,
+                String state,
+                String status,
+                String health,
+                int restarts,
+                long uptimeSeconds,
+                double cpuPercent,
+                long memoryUsed,
+                long memoryLimit,
+                long networkIn,
+                long networkOut
+        ) {
+        }
     }
 
     /**

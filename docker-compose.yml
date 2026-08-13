@@ -23,6 +23,37 @@ services:
       timeout: 5s
       retries: 5
 
+  # Lets the backend see the containers without ever touching the Docker socket.
+  #
+  # That socket is root on the host with no password: anything that can talk to it
+  # can start a privileged container and take the machine. Mounting it into a
+  # public-facing web application turns one bug in that application into a total
+  # compromise, so the backend does not get it. This does, and republishes only
+  # what the health screen reads.
+  #
+  # CONTAINERS=1 is the only permission granted. Everything else — images,
+  # volumes, networks, exec — is refused, and POST/PUT/DELETE are refused across
+  # the board because POST defaults to 0. Verified against this server: GET
+  # /containers/json answers, POST /containers/lms-backend/restart returns 403.
+  #
+  # No "ports" on purpose. Publishing 2375 would put a Docker API on the public
+  # internet, which is strictly worse than the socket it is protecting. Only
+  # containers on this compose network can reach it.
+  docker-socket-proxy:
+    # Pinned. "latest" on an image that guards the Docker socket means an
+    # unreviewed change to the thing holding the keys, arriving on a deploy that
+    # was about something else entirely.
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    restart: unless-stopped
+    container_name: lms-docker-proxy
+    environment:
+      - CONTAINERS=1
+    volumes:
+      # Read-only. The proxy is the boundary, not this flag — a socket is a
+      # two-way conversation and :ro does not make the API read-only — but there
+      # is no reason to hand out more than is needed.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   backend:
     image: ghcr.io/anter-mena/lms-backend:latest
     restart: unless-stopped
@@ -53,6 +84,10 @@ services:
       - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
       - BOOTSTRAP_ADMIN_FIRST_NAME=${BOOTSTRAP_ADMIN_FIRST_NAME:-System}
       - BOOTSTRAP_ADMIN_LAST_NAME=${BOOTSTRAP_ADMIN_LAST_NAME:-Administrator}
+
+      # By service name over the internal network. Nothing is published, so this
+      # address does not exist anywhere outside this compose project.
+      - DOCKER_API_URL=http://docker-socket-proxy:2375
     volumes:
       # Read-only, and a single file. Unlike /proc — which Docker does not put in
       # a namespace, so the container already sees the host's real CPU, memory
@@ -61,6 +96,22 @@ services:
       # Ubuntu. Nothing else is exposed by it.
       - /etc/os-release:/host/etc/os-release:ro
 
+      # The machine's network counters. /proc/net is namespaced too, and unlike
+      # os-release you cannot bind-mount your way out of it: procfs answers from
+      # the namespace of whoever is reading, so mounting /proc/net/dev still
+      # returns the container's own few megabytes. Naming a process that lives in
+      # the host's namespace does work, and PID 1 is always there.
+      #
+      # This is one file of interface byte counters. It is NOT /proc or /proc/1 —
+      # those would expose every process on the machine, including command lines
+      # and environments, which is where secrets live.
+      - /proc/1/net/dev:/host/proc/1/net/dev:ro
+
+    # Deliberately NOT depending on docker-socket-proxy. The backend is the
+    # product and the proxy is a panel on a monitoring page; coupling them means
+    # a failed pull of a third-party image takes the application down. Nothing
+    # needs it at startup either — it is read per request, and an unreachable one
+    # is already handled as "no data source" rather than an error.
     depends_on:
       db:
         condition: service_healthy

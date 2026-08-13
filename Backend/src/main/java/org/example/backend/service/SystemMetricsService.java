@@ -23,14 +23,15 @@ import java.util.Map;
 /**
  * Where the numbers on the System Health screen come from.
  *
- * <p>Three sources, and none of them needs anything installed:
+ * <p>Four sources, and none of them needs anything installed:
  *
  * <ul>
  *   <li><b>The machine</b> — {@code /proc}. Docker does not put it in a
  *       namespace, so a container reads the host's real CPU, memory and load with
  *       no mount and no extra privilege. {@code /proc/net} is the exception: that
- *       one <em>is</em> namespaced, so those counters are this container's
- *       traffic.</li>
+ *       one <em>is</em> namespaced, so the host's copy is mounted separately.</li>
+ *   <li><b>The containers</b> — {@link DockerService}, over a read-only proxy
+ *       rather than the socket itself.</li>
  *   <li><b>The application</b> — Micrometer, which Actuator already registers.
  *       Read from the registry directly rather than over the HTTP endpoint: the
  *       shape stays ours, and there is no second round of authentication.</li>
@@ -51,8 +52,28 @@ public class SystemMetricsService {
     /** Linux reports memory in kB; everything on the wire is bytes. */
     private static final long KB = 1024L;
 
+    /**
+     * The host's network counters, mounted read-only by compose.
+     *
+     * <p>{@code /proc/net} is the one part of {@code /proc} Docker really does put
+     * in a namespace, so reading it directly gives this container's own traffic —
+     * a few megabytes — rather than the machine's. Bind-mounting the file does not
+     * help either: procfs resolves per reading task, so the mount still answers
+     * from the caller's namespace. That was tried against the live server and
+     * returned the container's figures.
+     *
+     * <p>What does work is naming a process that lives in the host's namespace.
+     * PID 1 is init, it is always there, and {@code /proc/1/net/dev} is one
+     * read-only file containing nothing but interface byte counters — no process
+     * list, no command lines, no environment. Verified against the host: identical
+     * numbers.
+     */
+    private static final Path HOST_NETWORK = Path.of("/host/proc/1/net/dev");
+    private static final Path OWN_NETWORK = Path.of("/proc/net/dev");
+
     private final MeterRegistry meters;
     private final JdbcTemplate jdbc;
+    private final DockerService docker;
 
     /**
      * The previous CPU reading, so a percentage can be worked out.
@@ -63,14 +84,15 @@ public class SystemMetricsService {
      */
     private long[] previousCpu;
 
-    public SystemMetricsService(MeterRegistry meters, JdbcTemplate jdbc) {
+    public SystemMetricsService(MeterRegistry meters, JdbcTemplate jdbc, DockerService docker) {
         this.meters = meters;
         this.jdbc = jdbc;
+        this.docker = docker;
     }
 
     @Transactional(readOnly = true)
     public SystemHealthResponse snapshot() {
-        return new SystemHealthResponse(server(), backend(), database());
+        return new SystemHealthResponse(server(), docker.read(), backend(), database());
     }
 
     // ── The machine ─────────────────────────────────────────────────────────
@@ -78,7 +100,8 @@ public class SystemMetricsService {
     private SystemHealthResponse.Server server() {
         Map<String, Long> memory = readMeminfo();
         double[] load = readLoadAverage();
-        long[] network = readNetwork();
+        boolean hostNetwork = Files.isReadable(HOST_NETWORK);
+        long[] network = readNetwork(hostNetwork ? HOST_NETWORK : OWN_NETWORK);
         File root = new File("/");
 
         return new SystemHealthResponse.Server(
@@ -95,7 +118,8 @@ public class SystemMetricsService {
                 (int) load[3],
                 readUptimeSeconds(),
                 network[0],
-                network[1]
+                network[1],
+                hostNetwork
         );
     }
 
@@ -204,25 +228,38 @@ public class SystemMetricsService {
     /**
      * Bytes in and out, skipping loopback.
      *
-     * <p>⚠️ {@code /proc/net} <em>is</em> namespaced, so this is the container's
-     * own interface — the application's traffic, not the machine's. Reporting it
-     * as the VPS's bandwidth would be wrong.
+     * <p>Which file is passed decides whose traffic this is — see
+     * {@link #HOST_NETWORK}.
+     *
+     * <p>Only real interfaces are counted. The host also lists {@code docker0},
+     * a {@code br-} bridge per compose network and a {@code veth} per container,
+     * and a request from the internet crosses three of them on the way in. Adding
+     * them up would report roughly triple the traffic the machine actually
+     * carried.
      */
-    private long[] readNetwork() {
+    private long[] readNetwork(Path source) {
         long in = 0;
         long out = 0;
         try {
-            List<String> lines = Files.readAllLines(Path.of("/proc/net/dev"));
+            List<String> lines = Files.readAllLines(source);
             for (String line : lines.subList(Math.min(2, lines.size()), lines.size())) {
                 String[] parts = line.trim().split("[:\\s]+");
-                if (parts.length < 10 || parts[0].equals("lo")) continue;
+                if (parts.length < 10 || isVirtual(parts[0])) continue;
                 in += Long.parseLong(parts[1]);
                 out += Long.parseLong(parts[9]);
             }
         } catch (Exception e) {
-            log.debug("Could not read /proc/net/dev", e);
+            log.debug("Could not read {}", source, e);
         }
         return new long[]{in, out};
+    }
+
+    /** Loopback and the interfaces Docker builds, which mirror real traffic. */
+    private boolean isVirtual(String name) {
+        return name.equals("lo")
+                || name.startsWith("veth")
+                || name.startsWith("docker")
+                || name.startsWith("br-");
     }
 
     // ── The application ─────────────────────────────────────────────────────
