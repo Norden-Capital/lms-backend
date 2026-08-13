@@ -53,6 +53,14 @@ services:
       - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
       - BOOTSTRAP_ADMIN_FIRST_NAME=${BOOTSTRAP_ADMIN_FIRST_NAME:-System}
       - BOOTSTRAP_ADMIN_LAST_NAME=${BOOTSTRAP_ADMIN_LAST_NAME:-Administrator}
+    volumes:
+      # Read-only, and a single file. Unlike /proc — which Docker does not put in
+      # a namespace, so the container already sees the host's real CPU, memory
+      # and load — /etc/os-release IS namespaced, so without this the System
+      # Health page reports the container's Alpine instead of the machine's
+      # Ubuntu. Nothing else is exposed by it.
+      - /etc/os-release:/host/etc/os-release:ro
+
     depends_on:
       db:
         condition: service_healthy
