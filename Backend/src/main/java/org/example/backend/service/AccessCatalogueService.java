@@ -38,9 +38,17 @@ public class AccessCatalogueService {
      * <p>Every other action on a module depends on being able to see it, so a
      * prerequisite listed second reads as an afterthought. Fixed here rather than
      * in each screen, so the three grids cannot disagree about the order.
+     *
+     * <p>The last three belong to the Inbox, which has a mailbox's verbs rather
+     * than the CRUD set. They are listed for the same reason as the rest: an
+     * action missing from here still appears — the comparator sorts the unknown
+     * to the end — but several unknowns tie with each other, and their order on
+     * screen then depends on the order rows come back from the database. Listing
+     * them makes it a decision instead of an accident.
      */
     private static final List<String> ACTION_ORDER =
-            List.of("READ", "CREATE", "UPDATE", "DELETE", "EXPORT");
+            List.of("READ", "CREATE", "UPDATE", "DELETE", "EXPORT",
+                    "SEND", "ARCHIVE", "STAR");
 
     private final ModuleRepository moduleRepository;
     private final PermissionRepository permissionRepository;
