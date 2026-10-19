@@ -8,7 +8,9 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: anter-mena/lms-backend
+  # Lowercase on purpose: GHCR rejects uppercase, and the org is "Norden-Capital".
+  # Must match the image in docker-compose.yml.
+  IMAGE_NAME: norden-capital/lms-backend
 
 jobs:
   # ──────────────────────────────────────────────────────────────────────────
@@ -119,6 +121,10 @@ jobs:
     name: Deploy to VPS
     needs: build-push
     runs-on: ubuntu-latest
+    # The job's own GITHUB_TOKEN pulls the image, so no personal token is needed.
+    permissions:
+      contents: read
+      packages: read
 
     steps:
       - name: Checkout source
@@ -139,11 +145,16 @@ jobs:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
           ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          BOOTSTRAP_ADMIN_EMAIL: ${{ secrets.BOOTSTRAP_ADMIN_EMAIL }}
+          BOOTSTRAP_ADMIN_PASSWORD: ${{ secrets.BOOTSTRAP_ADMIN_PASSWORD }}
+          BOOTSTRAP_ADMIN_FIRST_NAME: ${{ secrets.BOOTSTRAP_ADMIN_FIRST_NAME }}
+          BOOTSTRAP_ADMIN_LAST_NAME: ${{ secrets.BOOTSTRAP_ADMIN_LAST_NAME }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: JWT_SECRET,ENCRYPTION_KEY,POSTGRES_PASSWORD
+          envs: JWT_SECRET,ENCRYPTION_KEY,POSTGRES_PASSWORD,BOOTSTRAP_ADMIN_EMAIL,BOOTSTRAP_ADMIN_PASSWORD,BOOTSTRAP_ADMIN_FIRST_NAME,BOOTSTRAP_ADMIN_LAST_NAME,GHCR_TOKEN
           script: |
             set -e
 
@@ -162,13 +173,19 @@ jobs:
             JWT_SECRET=${JWT_SECRET}
             ENCRYPTION_KEY=${ENCRYPTION_KEY}
             POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            BOOTSTRAP_ADMIN_EMAIL=${BOOTSTRAP_ADMIN_EMAIL}
+            BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD}
+            BOOTSTRAP_ADMIN_FIRST_NAME=${BOOTSTRAP_ADMIN_FIRST_NAME}
+            BOOTSTRAP_ADMIN_LAST_NAME=${BOOTSTRAP_ADMIN_LAST_NAME}
             EOF
 
-            # Login to GHCR to pull private package
-            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # The job token is only valid while this job runs, so log out at the
+            # end rather than leave a dead credential on the server.
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
             # Pull the new image and start both backend and postgres
             docker compose pull
+            docker logout ghcr.io
             docker compose up -d
 
             # Remove dangling images to keep disk clean

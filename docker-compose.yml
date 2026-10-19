@@ -55,11 +55,15 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
   backend:
-    image: ghcr.io/anter-mena/lms-backend:latest
+    image: ghcr.io/norden-capital/lms-backend:latest
     restart: unless-stopped
     container_name: lms-backend
     ports:
-      - "8080:8080"
+      # 127.0.0.1 only. Caddy on the host is the public entrance and serves
+      # https://api.nordencapital.ca. Docker writes its own firewall rules, so a
+      # plain "8080:8080" would put the backend on the internet over plain HTTP
+      # no matter what ufw says.
+      - "127.0.0.1:8080:8080"
     environment:
       - SPRING_DATASOURCE_URL=jdbc:postgresql://db:5432/lmsdb
       - SPRING_DATASOURCE_USERNAME=lmsuser
@@ -84,6 +88,9 @@ services:
       - BOOTSTRAP_ADMIN_PASSWORD=${BOOTSTRAP_ADMIN_PASSWORD:-}
       - BOOTSTRAP_ADMIN_FIRST_NAME=${BOOTSTRAP_ADMIN_FIRST_NAME:-System}
       - BOOTSTRAP_ADMIN_LAST_NAME=${BOOTSTRAP_ADMIN_LAST_NAME:-Administrator}
+
+      # The deployed frontend. Without it the backend only trusts localhost:3000.
+      - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://app.nordencapital.ca}
 
       # By service name over the internal network. Nothing is published, so this
       # address does not exist anywhere outside this compose project.
