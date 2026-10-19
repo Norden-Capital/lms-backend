@@ -10,19 +10,26 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * The one-time link emailed out when someone forgets their password.
+ * A one-time link sent by email: an invitation, or a password reset.
  *
  * <p>Only the hash is stored — the raw token exists solely in the email, so
- * anyone reading the database still cannot reset anyone's password.
+ * anyone reading the database still cannot use a link.
  */
 @Entity
-@Table(name = "password_reset_tokens")
+@Table(name = "auth_tokens")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class PasswordResetToken {
+public class AuthToken {
+
+    public enum Type {
+        /** "Forgot password", or an administrator sending somebody a reset link. */
+        PASSWORD_RESET,
+        /** A new account choosing its first password. */
+        INVITE
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -32,10 +39,14 @@ public class PasswordResetToken {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private Type type;
+
     @Column(name = "token_hash", nullable = false, unique = true, length = 255)
     private String tokenHash;
 
-    /** A reset link that never expires is a permanent key to the account sitting in an inbox. */
+    /** A link that never expires is a permanent key to the account sitting in an inbox. */
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 

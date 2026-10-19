@@ -4,12 +4,9 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import org.example.backend.dto.*;
 import org.example.backend.entity.MfaRecoveryCode;
-import org.example.backend.entity.Role;
 import org.example.backend.entity.User;
-import org.example.backend.entity.UserStatus;
 import org.example.backend.exception.ApiException;
 import org.example.backend.repository.MfaRecoveryCodeRepository;
-import org.example.backend.repository.RoleRepository;
 import org.example.backend.repository.UserRepository;
 import org.example.backend.security.JwtService;
 import org.slf4j.Logger;
@@ -25,7 +22,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * Registration, login, and the full two-factor lifecycle.
+ * Login, and the full two-factor lifecycle.
  *
  * <p><b>Why login is two calls.</b> The previous implementation exposed 2FA setup
  * and verification as anonymous endpoints, and the verify step handed out a real
@@ -46,10 +43,8 @@ public class AuthService {
     /** Identical for unknown emails and wrong passwords, so the API can't be used to discover who has an account. */
     private static final String GENERIC_LOGIN_FAILURE = "Invalid email or password.";
 
-    private static final String DEFAULT_ROLE = "MEMBER";
 
     private final UserRepository userRepository;
-    private final RoleRepository roleRepository;
     private final MfaRecoveryCodeRepository recoveryCodeRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -58,7 +53,6 @@ public class AuthService {
     private final PermissionService permissionService;
 
     public AuthService(UserRepository userRepository,
-                       RoleRepository roleRepository,
                        MfaRecoveryCodeRepository recoveryCodeRepository,
                        PasswordEncoder passwordEncoder,
                        JwtService jwtService,
@@ -66,7 +60,6 @@ public class AuthService {
                        EncryptionService encryptionService,
                        PermissionService permissionService) {
         this.userRepository = userRepository;
-        this.roleRepository = roleRepository;
         this.recoveryCodeRepository = recoveryCodeRepository;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
@@ -75,38 +68,8 @@ public class AuthService {
         this.permissionService = permissionService;
     }
 
-    // ── Registration ────────────────────────────────────────────────────────
-
-    @Transactional
-    public UserResponse register(RegisterRequest request) {
-        String email = normaliseEmail(request.email());
-
-        if (userRepository.existsByEmail(email)) {
-            throw ApiException.conflict("An account with this email already exists.");
-        }
-
-        Role role = roleRepository.findByName(DEFAULT_ROLE)
-                .orElseThrow(() -> new IllegalStateException(
-                        "Role " + DEFAULT_ROLE + " is missing — check the V2 seed migration ran"));
-
-        User user = User.builder()
-                .firstName(request.firstName().trim())
-                .lastName(request.lastName().trim())
-                .email(email)
-                .phone(blankToNull(request.phone()))
-                .passwordHash(passwordEncoder.encode(request.password()))
-                .role(role)
-                // Email verification isn't wired up yet (no mail server configured),
-                // so accounts start usable. Once SMTP exists this becomes
-                // PENDING_VERIFICATION and the emailed link flips it to ACTIVE.
-                .status(UserStatus.ACTIVE)
-                .build();
-
-        userRepository.save(user);
-        log.info("Registered new user id={} with role {}", user.getId(), role.getName());
-
-        return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
-    }
+    // There is no self-registration. Accounts are created by invitation only —
+    // see UserService.create and AccountLinkService.
 
     // ── Login, step one: password ───────────────────────────────────────────
 
@@ -423,9 +386,5 @@ public class AuthService {
 
     private static String normaliseEmail(String email) {
         return email == null ? null : email.trim().toLowerCase();
-    }
-
-    private static String blankToNull(String value) {
-        return (value == null || value.isBlank()) ? null : value.trim();
     }
 }

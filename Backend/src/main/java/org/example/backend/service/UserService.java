@@ -6,10 +6,12 @@ import org.example.backend.dto.PageResponse;
 import org.example.backend.dto.UpdateUserRequest;
 import org.example.backend.dto.UserResponse;
 import org.example.backend.dto.UserSummaryResponse;
+import org.example.backend.entity.AuthToken;
 import org.example.backend.entity.Role;
 import org.example.backend.entity.User;
 import org.example.backend.entity.UserStatus;
 import org.example.backend.exception.ApiException;
+import org.example.backend.repository.AuthTokenRepository;
 import org.example.backend.repository.RoleRepository;
 import org.example.backend.repository.UserPermissionRepository;
 import org.example.backend.repository.UserRepository;
@@ -20,11 +22,11 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -74,20 +76,23 @@ public class UserService {
     private final UserPermissionRepository userPermissionRepository;
     private final PermissionService permissionService;
     private final AccessService accessService;
-    private final PasswordEncoder passwordEncoder;
+    private final AccountLinkService accountLinkService;
+    private final AuthTokenRepository authTokenRepository;
 
     public UserService(UserRepository userRepository,
                        RoleRepository roleRepository,
                        UserPermissionRepository userPermissionRepository,
                        PermissionService permissionService,
                        AccessService accessService,
-                       PasswordEncoder passwordEncoder) {
+                       AccountLinkService accountLinkService,
+                       AuthTokenRepository authTokenRepository) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.userPermissionRepository = userPermissionRepository;
         this.permissionService = permissionService;
         this.accessService = accessService;
-        this.passwordEncoder = passwordEncoder;
+        this.accountLinkService = accountLinkService;
+        this.authTokenRepository = authTokenRepository;
     }
 
     /**
@@ -132,18 +137,22 @@ public class UserService {
     }
 
     /**
-     * Creating somebody else's account, with a role chosen by the creator.
+     * Inviting somebody, with a role chosen by the inviter.
      *
-     * <p>The new account starts ACTIVE and without two-factor. That second part is
-     * not a gap: two-factor is mandatory here, so their first sign-in lands them
-     * in enrolment and they can do nothing else until they finish it.
+     * <p>The account starts PENDING_VERIFICATION, with a password nobody knows,
+     * and an invitation email goes out. The person chooses their own password from
+     * that link, which makes the account ACTIVE; their first sign-in then lands
+     * them in two-factor enrolment, which is mandatory.
      */
     @Transactional
     public UserResponse create(CreateUserRequest request, Long actingUserId) {
         String email = normaliseEmail(request.email());
 
-        if (userRepository.existsByEmail(email)) {
-            throw ApiException.conflict("An account with this email already exists.");
+        Optional<User> existing = userRepository.findByEmail(email);
+        if (existing.isPresent()) {
+            throw ApiException.conflict(existing.get().getStatus() == UserStatus.PENDING_VERIFICATION
+                    ? "This person was already invited. Open their account to resend the invitation."
+                    : "An account with this email already exists.");
         }
 
         String roleName = request.role().trim().toUpperCase();
@@ -156,16 +165,14 @@ public class UserService {
                 .lastName(request.lastName().trim())
                 .email(email)
                 .phone(blankToNull(request.phone()))
-                .passwordHash(passwordEncoder.encode(request.password()))
+                .passwordHash(accountLinkService.unusablePasswordHash())
                 .role(role)
-                // ACTIVE rather than PENDING_VERIFICATION: nothing sends email, so
-                // an account waiting on a link nobody receives would be an account
-                // that can never be used.
-                .status(UserStatus.ACTIVE)
+                .status(UserStatus.PENDING_VERIFICATION)
                 .build();
 
         userRepository.save(user);
-        log.info("User id={} created account id={} with role {}", actingUserId, user.getId(), roleName);
+        accountLinkService.sendInvitation(user, actingUserId);
+        log.info("User id={} invited account id={} with role {}", actingUserId, user.getId(), roleName);
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
@@ -223,6 +230,14 @@ public class UserService {
                     "That account is already " + status.name().toLowerCase() + ".");
         }
 
+        // An invited person becomes active by choosing a password from their
+        // email. Switching them on here would make an account nobody can sign in
+        // to, because nobody knows its password.
+        if (user.getStatus() == UserStatus.PENDING_VERIFICATION && status == UserStatus.ACTIVE) {
+            throw ApiException.badRequest(
+                    "This person hasn't accepted their invitation yet. Resend it instead.");
+        }
+
         boolean losingAnActiveAdmin = user.getStatus() == UserStatus.ACTIVE
                 && status != UserStatus.ACTIVE
                 && ADMIN_ROLE.equals(user.getRole().getName());
@@ -240,6 +255,9 @@ public class UserService {
         // there is nothing to revoke, and moving it would be pointless churn.
         if (status != UserStatus.ACTIVE) {
             user.setTokensValidFrom(Instant.now());
+            // Any invitation or reset link in their inbox dies with the account.
+            authTokenRepository.deleteByUserIdAndType(id, AuthToken.Type.INVITE);
+            authTokenRepository.deleteByUserIdAndType(id, AuthToken.Type.PASSWORD_RESET);
         }
 
         userRepository.save(user);
@@ -324,61 +342,6 @@ public class UserService {
                 actingUserId, id, wanted, cleared);
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
-    }
-
-    /**
-     * An administrator setting somebody else's password.
-     *
-     * <p>Also clears any lockout. Somebody who has been asked for a new password
-     * has usually been trying the old one and failing, so leaving them locked out
-     * would mean handing over a password that does not work yet.
-     *
-     * <p>Refused on your own account. Changing your own password has to prove you
-     * know the current one, and this endpoint deliberately cannot ask — so
-     * allowing it here would turn "administrator" into "can rewrite my own
-     * password without knowing it", which is a different and much weaker thing.
-     *
-     * <p>⚠️ <b>Their existing sessions keep working.</b> Tokens are self-contained
-     * and nothing revokes them, so a stolen session survives the password change
-     * that was meant to end it. That is the token-revocation gap on the bug list,
-     * and it is the reason this cannot yet be called a way to lock an intruder
-     * out.
-     *
-     * <p>⚠️ Nothing forces a change at next sign-in. There is no
-     * {@code must_change_password} column, so a temporary password is simply the
-     * password until somebody says otherwise.
-     */
-    @Transactional
-    public MessageResponse setPassword(Long id, String rawPassword, Long actingUserId) {
-        if (id.equals(actingUserId)) {
-            throw ApiException.forbidden(
-                    "Use your own account settings to change your password — that asks for your "
-                            + "current one, and this does not.");
-        }
-
-        User user = userRepository.findById(id)
-                .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
-
-        user.setPasswordHash(passwordEncoder.encode(rawPassword));
-
-        // The failed attempts belonged to the old password. Carrying them over
-        // would lock somebody out with credentials that have just been fixed.
-        user.setFailedLoginAttempts(0);
-        user.setLockedUntil(null);
-
-        // Every session this account has, anywhere, stops on its next request.
-        // Without this a reset changed the password while leaving whoever was
-        // already inside exactly where they were — which is the opposite of what
-        // somebody resetting a compromised password is trying to do.
-        user.setTokensValidFrom(Instant.now());
-
-        userRepository.save(user);
-        accessService.invalidate(id);
-        log.info("User id={} set a new password for account id={}", actingUserId, id);
-
-        return new MessageResponse(
-                "Password updated and existing sessions ended. Hand it over yourself — "
-                        + "nothing was emailed.");
     }
 
     /**

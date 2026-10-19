@@ -92,6 +92,16 @@ services:
       # The deployed frontend. Without it the backend only trusts localhost:3000.
       - CORS_ALLOWED_ORIGINS=${CORS_ALLOWED_ORIGINS:-https://app.nordencapital.ca}
 
+      # Email: invitations and password-reset links. With no host, nothing is
+      # sent and each link is written to the backend log instead — the flow
+      # still works, and `docker compose logs backend` shows the gap.
+      - FRONTEND_URL=${FRONTEND_URL:-https://app.nordencapital.ca}
+      - MAIL_FROM=${MAIL_FROM:-Norden Capital <noreply@nordencapital.ca>}
+      - SPRING_MAIL_HOST=${SPRING_MAIL_HOST:-}
+      - SPRING_MAIL_PORT=${SPRING_MAIL_PORT:-587}
+      - SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME:-}
+      - SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD:-}
+
       # By service name over the internal network. Nothing is published, so this
       # address does not exist anywhere outside this compose project.
       - DOCKER_API_URL=http://docker-socket-proxy:2375

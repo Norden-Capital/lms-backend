@@ -6,21 +6,12 @@ import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 /**
- * An administrator creating somebody else's account.
+ * An administrator inviting somebody: who they are, and their role.
  *
- * <p>Not {@link RegisterRequest}, and the difference is the whole point: that one
- * is self-registration and has no role field, because letting the caller choose
- * their own role would let anyone sign up as an administrator. This one is
- * reached only with {@code USER:CREATE}, so choosing the role is exactly what it
- * is for.
- *
- * <p>The password is set by the administrator and handed over out of band. There
- * is no mail server, so an invitation link is not an option — and this matches
- * what the add-user screen does, which generates one and asks you to pass it on.
- *
- * <p>⚠️ Nothing forces the person to change it afterwards. There is no
- * {@code must_change_password} column, so a temporary password stays their
- * password until somebody tells them otherwise.
+ * <p>There is no password field, and that is the point. The person receives an
+ * invitation email and chooses their own, so no administrator ever knows anyone
+ * else's password. Reached only with {@code USER:CREATE}, so choosing the role is
+ * exactly what it is for — there is no self-registration.
  */
 public record CreateUserRequest(
 
@@ -36,10 +27,6 @@ public record CreateUserRequest(
         @Email(message = "Must be a valid email address")
         @Size(max = 255, message = "Email must be at most 255 characters")
         String email,
-
-        @NotBlank(message = "Password is required")
-        @Size(min = 8, max = 100, message = "Password must be between 8 and 100 characters")
-        String password,
 
         @Pattern(regexp = "^$|^\\+?[0-9 ()-]{6,20}$", message = "Phone number format is not valid")
         String phone,

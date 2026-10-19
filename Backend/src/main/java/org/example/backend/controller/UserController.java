@@ -4,7 +4,6 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
-import org.example.backend.dto.AdminSetPasswordRequest;
 import org.example.backend.dto.ChangeRoleRequest;
 import org.example.backend.dto.CreateUserRequest;
 import org.example.backend.dto.MessageResponse;
@@ -19,6 +18,7 @@ import org.example.backend.entity.UserStatus;
 import org.example.backend.exception.ApiException;
 import org.example.backend.repository.UserRepository;
 import org.example.backend.security.AuthPrincipal;
+import org.example.backend.service.AccountLinkService;
 import org.example.backend.service.AuthService;
 import org.example.backend.service.PermissionService;
 import org.example.backend.service.UserPermissionService;
@@ -49,17 +49,20 @@ public class UserController {
     private final AuthService authService;
     private final UserService userService;
     private final UserPermissionService userPermissionService;
+    private final AccountLinkService accountLinkService;
 
     public UserController(UserRepository userRepository,
                           PermissionService permissionService,
                           AuthService authService,
                           UserService userService,
-                          UserPermissionService userPermissionService) {
+                          UserPermissionService userPermissionService,
+                          AccountLinkService accountLinkService) {
         this.userRepository = userRepository;
         this.permissionService = permissionService;
         this.authService = authService;
         this.userService = userService;
         this.userPermissionService = userPermissionService;
+        this.accountLinkService = accountLinkService;
     }
 
     @GetMapping("/me")
@@ -113,17 +116,14 @@ public class UserController {
 
     @PostMapping
     @PreAuthorize("hasAuthority('USER:CREATE')")
-    @Operation(summary = "Create an account for somebody else",
+    @Operation(summary = "Invite somebody",
                description = """
-                       Unlike `/api/auth/register`, this one chooses the role — which is exactly
-                       why it needs USER:CREATE and registration does not.
+                       Creates the account as PENDING_VERIFICATION and emails an invitation. The
+                       person chooses their own password from the link (valid 7 days), which makes
+                       the account ACTIVE. Their first sign-in then lands them in two-factor
+                       enrolment, which is mandatory.
 
-                       The password is set here and handed over out of band. Nothing is emailed:
-                       there is no mail server configured.
-
-                       The account starts ACTIVE with two-factor off, which means their first
-                       sign-in lands them in enrolment and they can do nothing else until they
-                       finish it.""")
+                       This is the only way an account is created — there is no self-registration.""")
     public ResponseEntity<UserResponse> create(@Valid @RequestBody CreateUserRequest request,
                                                @AuthenticationPrincipal AuthPrincipal principal) {
 
@@ -186,29 +186,31 @@ public class UserController {
         return ResponseEntity.ok(userService.changeRole(id, request.role(), principal.userId()));
     }
 
-    @PostMapping("/{id}/password")
+    @PostMapping("/{id}/password-reset")
     @PreAuthorize("hasAuthority('USER:UPDATE')")
-    @Operation(summary = "Set a new password for somebody else",
+    @Operation(summary = "Email somebody a password reset link",
                description = """
-                       For a person who cannot get in. It does not ask for the current password —
-                       the administrator does not know it, and the whole point is that the person
-                       who did has forgotten it. The safeguard is USER:UPDATE instead.
+                       For a person who cannot get in. The administrator never sees or chooses the
+                       password: the person picks it from their own inbox. Two-factor is unchanged.
 
-                       Any lockout from failed attempts is cleared at the same time, since those
-                       failures belonged to a password that no longer exists.
+                       Refused for an invited person who has not joined yet (resend the invitation
+                       instead), for a switched-off account, and twice within a minute.""")
+    public ResponseEntity<MessageResponse> sendPasswordReset(@PathVariable Long id,
+                                                             @AuthenticationPrincipal AuthPrincipal principal) {
 
-                       Nothing is emailed. Copy it and hand it over.
+        return ResponseEntity.ok(accountLinkService.sendPasswordReset(id, principal.userId()));
+    }
 
-                       ⚠️ Their existing sessions keep working: tokens are self-contained and
-                       nothing revokes them. So this is not yet a way to lock an intruder out.
+    @PostMapping("/{id}/invitation")
+    @PreAuthorize("hasAuthority('USER:CREATE')")
+    @Operation(summary = "Send the invitation email again",
+               description = """
+                       For an invited person who lost the email or let it expire. The old link stops
+                       working. Refused once they have joined, and twice within a minute.""")
+    public ResponseEntity<MessageResponse> resendInvitation(@PathVariable Long id,
+                                                            @AuthenticationPrincipal AuthPrincipal principal) {
 
-                       Refused on your own account — use your own settings, which ask for your
-                       current password.""")
-    public ResponseEntity<MessageResponse> setPassword(@PathVariable Long id,
-                                                       @Valid @RequestBody AdminSetPasswordRequest request,
-                                                       @AuthenticationPrincipal AuthPrincipal principal) {
-
-        return ResponseEntity.ok(userService.setPassword(id, request.password(), principal.userId()));
+        return ResponseEntity.ok(accountLinkService.resendInvitation(id, principal.userId()));
     }
 
     @PutMapping("/{id}/permissions")

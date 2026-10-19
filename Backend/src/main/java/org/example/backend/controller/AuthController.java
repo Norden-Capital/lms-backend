@@ -7,8 +7,8 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.example.backend.dto.*;
 import org.example.backend.security.AuthPrincipal;
+import org.example.backend.service.AccountLinkService;
 import org.example.backend.service.AuthService;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -18,24 +18,20 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/auth")
-@Tag(name = "Authentication", description = "Registration, login and two-factor authentication")
+@Tag(name = "Authentication", description = "Login, emailed links, and two-factor authentication")
 public class AuthController {
 
     private final AuthService authService;
+    private final AccountLinkService accountLinkService;
 
-    public AuthController(AuthService authService) {
+    public AuthController(AuthService authService, AccountLinkService accountLinkService) {
         this.authService = authService;
+        this.accountLinkService = accountLinkService;
     }
 
     // ── Anonymous ───────────────────────────────────────────────────────────
 
-    @PostMapping("/register")
-    @SecurityRequirements   // no token needed
-    @Operation(summary = "Create an account",
-               description = "New accounts always receive the MEMBER role. Changing a role is an admin action.")
-    public ResponseEntity<UserResponse> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
-    }
+    // There is no /register. Accounts are created by invitation only.
 
     @PostMapping("/login")
     @SecurityRequirements
@@ -56,6 +52,53 @@ public class AuthController {
                description = "Send either the 6-digit `code` from the authenticator app, or a `recoveryCode`.")
     public ResponseEntity<LoginResponse> loginTwoFactor(@Valid @RequestBody LoginTwoFactorRequest request) {
         return ResponseEntity.ok(authService.loginTwoFactor(request));
+    }
+
+    // ── Anonymous: the links in emails ──────────────────────────────────────
+    //
+    // Tokens travel in POST bodies, never query strings, so they stay out of
+    // access logs. None of these get past two-factor: they set a password, and
+    // signing in still asks for the authenticator code.
+
+    @PostMapping("/password/forgot")
+    @SecurityRequirements
+    @Operation(summary = "Email a password reset link",
+               description = """
+                       Always answers the same, whether or not the address has an account — so it
+                       cannot be used to find out who has one. Only active accounts get a link.""")
+    public ResponseEntity<MessageResponse> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        return ResponseEntity.ok(accountLinkService.forgotPassword(request.email()));
+    }
+
+    @PostMapping("/password/reset/check")
+    @SecurityRequirements
+    @Operation(summary = "Is this reset link still good?",
+               description = "Lets the page show the form, or say the link has expired, before anyone types.")
+    public ResponseEntity<LinkInfoResponse> checkPasswordReset(@Valid @RequestBody LinkTokenRequest request) {
+        return ResponseEntity.ok(accountLinkService.checkPasswordReset(request.token()));
+    }
+
+    @PostMapping("/password/reset")
+    @SecurityRequirements
+    @Operation(summary = "Choose a new password from a reset link",
+               description = "Clears any lockout and ends every existing session. Two-factor is unchanged.")
+    public ResponseEntity<MessageResponse> resetPassword(@Valid @RequestBody SetPasswordWithTokenRequest request) {
+        return ResponseEntity.ok(accountLinkService.resetPassword(request));
+    }
+
+    @PostMapping("/invitation/check")
+    @SecurityRequirements
+    @Operation(summary = "Is this invitation still good, and who is it for?")
+    public ResponseEntity<LinkInfoResponse> checkInvitation(@Valid @RequestBody LinkTokenRequest request) {
+        return ResponseEntity.ok(accountLinkService.checkInvitation(request.token()));
+    }
+
+    @PostMapping("/invitation/accept")
+    @SecurityRequirements
+    @Operation(summary = "Accept an invitation by choosing a password",
+               description = "The account becomes active. The first sign-in then goes to two-factor enrolment.")
+    public ResponseEntity<MessageResponse> acceptInvitation(@Valid @RequestBody SetPasswordWithTokenRequest request) {
+        return ResponseEntity.ok(accountLinkService.acceptInvitation(request));
     }
 
     // ── Authenticated: managing your own second factor ──────────────────────

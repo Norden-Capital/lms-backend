@@ -43,6 +43,11 @@ public class ApiException extends RuntimeException {
         return new ApiException(HttpStatus.CONFLICT, message);
     }
 
+    /** Asked again too soon — an email button pressed twice in a minute, typically. */
+    public static ApiException tooManyRequests(String message) {
+        return new ApiException(HttpStatus.TOO_MANY_REQUESTS, message);
+    }
+
     /** Too many failed attempts; the account is temporarily locked. */
     public static ApiException locked(String message) {
         return new ApiException(HttpStatus.LOCKED, message);

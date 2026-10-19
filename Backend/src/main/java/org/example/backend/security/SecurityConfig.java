@@ -64,15 +64,25 @@ public class SecurityConfig {
                     .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
                     .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
 
+                    // Sample renders of the emails, for the frontend's /preview
+                    // page. Invented data only — see EmailPreviewController.
+                    .requestMatchers(HttpMethod.GET, "/api/email-previews").permitAll()
+
                     // The only genuinely anonymous auth endpoints. Listed one by
                     // one on purpose — a blanket /api/auth/** is what previously
                     // left 2FA setup open to the world.
+                    //
+                    // There is no /register: accounts exist by invitation only.
+                    // The link endpoints are proven by the token in the request,
+                    // and none of them get past two-factor.
                     .requestMatchers(HttpMethod.POST,
-                            "/api/auth/register",
                             "/api/auth/login",
                             "/api/auth/login/2fa",
                             "/api/auth/password/forgot",
-                            "/api/auth/password/reset").permitAll()
+                            "/api/auth/password/reset/check",
+                            "/api/auth/password/reset",
+                            "/api/auth/invitation/check",
+                            "/api/auth/invitation/accept").permitAll()
 
                     // ── The enrolment allowlist ──────────────────────────────
                     // Reachable while still owing a second factor. Nothing here
