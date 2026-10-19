@@ -36,7 +36,7 @@ public class SystemController {
     }
 
     @GetMapping("/health")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyRole('ADMIN', 'OWNER')")
     @Operation(summary = "Live figures for the server, the backend and the database",
                description = """
                        One call rather than four, because the page draws them side by side and

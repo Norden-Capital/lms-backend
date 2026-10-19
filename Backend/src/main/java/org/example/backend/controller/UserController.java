@@ -93,7 +93,9 @@ public class UserController {
                        name does not know which column it lives in.
 
                        `sort` is `field,direction` — for example `lastName,asc`. Sorting by
-                       anything outside the allowed list is a 400 rather than a 500.""")
+                       anything outside the allowed list is a 400 rather than a 500.
+
+                       Your own account is never in the list — it is managed from your settings.""")
     public ResponseEntity<PageResponse<UserSummaryResponse>> list(
             @RequestParam(required = false) String search,
             @RequestParam(required = false) String role,
@@ -101,9 +103,11 @@ public class UserController {
             @RequestParam(required = false) Boolean mfaEnabled,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "10") int size,
-            @RequestParam(required = false) String sort) {
+            @RequestParam(required = false) String sort,
+            @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(userService.list(search, role, status, mfaEnabled, page, size, sort));
+        return ResponseEntity.ok(userService.list(search, role, status, mfaEnabled, page, size, sort,
+                principal.userId()));
     }
 
     @GetMapping("/{id}")

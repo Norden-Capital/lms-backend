@@ -205,8 +205,13 @@ public class AccountLinkService {
      */
     @Transactional
     public MessageResponse sendPasswordReset(Long userId, Long actingUserId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findWithRoleById(userId)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + userId + "."));
+
+        // The Owner uses "Forgot password?" like anybody else; nobody sends
+        // reset links to the Owner's account on the Owner's behalf.
+        UserService.refuseIfOwnerOfSomebodyElse(user, actingUserId,
+                "Reset links for the Owner's account can only be requested by the Owner.");
 
         if (user.getStatus() == UserStatus.PENDING_VERIFICATION) {
             throw ApiException.badRequest("This person hasn't joined yet. Resend the invitation instead.");

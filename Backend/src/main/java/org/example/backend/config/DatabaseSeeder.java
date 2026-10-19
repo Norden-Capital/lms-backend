@@ -1,6 +1,7 @@
 package org.example.backend.config;
 
 import org.example.backend.entity.Role;
+import org.example.backend.entity.Roles;
 import org.example.backend.entity.User;
 import org.example.backend.entity.UserStatus;
 import org.example.backend.repository.RoleRepository;
@@ -51,7 +52,6 @@ public class DatabaseSeeder {
 
     private static final Logger log = LoggerFactory.getLogger(DatabaseSeeder.class);
 
-    private static final String ADMIN_ROLE = "ADMIN";
 
     /** No default. An unset value means "create nothing", never "use a fallback". */
     @Value("${bootstrap.admin.email:}")
@@ -91,16 +91,18 @@ public class DatabaseSeeder {
                 return;
             }
 
-            Role admin = roleRepository.findByName(ADMIN_ROLE)
+            // The Owner, not an administrator: the bootstrap account is the one
+            // account that can deactivate administrators (migration V6).
+            Role owner = roleRepository.findByName(Roles.OWNER)
                     .orElseThrow(() -> new IllegalStateException(
-                            "Role " + ADMIN_ROLE + " is missing — check the migrations ran"));
+                            "Role " + Roles.OWNER + " is missing — check the migrations ran"));
 
             User user = User.builder()
                     .firstName(adminFirstName.trim())
                     .lastName(adminLastName.trim())
                     .email(adminEmail.trim().toLowerCase())
                     .passwordHash(passwordEncoder.encode(adminPassword))
-                    .role(admin)
+                    .role(owner)
                     // ACTIVE rather than PENDING_VERIFICATION: nothing sends email, so an
                     // account waiting on a link nobody receives could never be used.
                     .status(UserStatus.ACTIVE)
@@ -111,7 +113,7 @@ public class DatabaseSeeder {
             // The email, never the password. A log file is a place passwords are
             // found later, and this one is already known to whoever set it.
             log.info("""
-                    Bootstrap administrator created: {}
+                    Bootstrap account created as the Owner: {}
 
                     Two-factor is mandatory, so the first sign-in goes straight to enrolment. \
                     Nothing else can be done until it is finished.""", user.getEmail());

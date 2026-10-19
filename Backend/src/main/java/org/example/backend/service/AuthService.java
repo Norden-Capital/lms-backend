@@ -280,7 +280,13 @@ public class AuthService {
                     "You cannot reset your own two-factor authentication. Ask another administrator.");
         }
 
-        User target = requireUser(targetUserId);
+        User target = userRepository.findWithRoleById(targetUserId)
+                .orElseThrow(() -> ApiException.notFound("User not found."));
+
+        // The Owner's second factor is the last lock on the one account that can
+        // remove administrators. Nobody else clears it.
+        UserService.refuseIfOwnerOfSomebodyElse(target, actingUserId,
+                "Only the Owner can reset the Owner's two-factor authentication.");
 
         if (!target.isMfaEnabled() && target.getMfaSecret() == null) {
             throw ApiException.conflict("Two-factor authentication is not set up for this account.");

@@ -8,6 +8,7 @@ import org.example.backend.dto.UserResponse;
 import org.example.backend.dto.UserSummaryResponse;
 import org.example.backend.entity.AuthToken;
 import org.example.backend.entity.Role;
+import org.example.backend.entity.Roles;
 import org.example.backend.entity.User;
 import org.example.backend.entity.UserStatus;
 import org.example.backend.exception.ApiException;
@@ -56,7 +57,7 @@ public class UserService {
      * misspelt.
      */
     private static final Set<String> SORTABLE = Set.of(
-            "id", "firstName", "lastName", "email", "status", "mfaEnabled", "createdAt"
+            "id", "firstName", "lastName", "email", "role", "status", "mfaEnabled", "createdAt"
     );
 
     /**
@@ -68,8 +69,6 @@ public class UserService {
      */
     private static final int MAX_PAGE_SIZE = 100;
 
-    /** The role that must always have at least one working account. */
-    private static final String ADMIN_ROLE = "ADMIN";
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
@@ -103,6 +102,8 @@ public class UserService {
      * @param status     exact status, or null for any
      * @param mfaEnabled two-factor on or off, or null for either
      * @param sort       {@code field,direction} — see {@link #SORTABLE}
+     * @param actingUserId left out of the results: your own account is managed
+     *                     from your settings, not from the list of other people
      */
     @Transactional(readOnly = true)
     public PageResponse<UserSummaryResponse> list(String search,
@@ -111,7 +112,8 @@ public class UserService {
                                                   Boolean mfaEnabled,
                                                   int page,
                                                   int size,
-                                                  String sort) {
+                                                  String sort,
+                                                  Long actingUserId) {
 
         Pageable pageable = PageRequest.of(
                 Math.max(page, 0),
@@ -120,7 +122,8 @@ public class UserService {
         );
 
         Page<User> found = userRepository.findAll(
-                UserSpecifications.matching(search, role, status, mfaEnabled),
+                UserSpecifications.matching(search, role, status, mfaEnabled)
+                        .and((root, query, builder) -> builder.notEqual(root.get("id"), actingUserId)),
                 pageable
         );
 
@@ -157,6 +160,10 @@ public class UserService {
 
         String roleName = request.role().trim().toUpperCase();
 
+        if (Roles.OWNER.equals(roleName)) {
+            throw ApiException.badRequest("There is only one Owner. Invite them as an administrator or a member.");
+        }
+
         Role role = roleRepository.findByNameWithPermissions(roleName)
                 .orElseThrow(() -> ApiException.badRequest("There is no role called " + request.role() + "."));
 
@@ -182,6 +189,10 @@ public class UserService {
     public UserResponse update(Long id, UpdateUserRequest request, Long actingUserId) {
         User user = userRepository.findWithRoleById(id)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
+
+        // Changing the Owner's email would let a reset link for the Owner's
+        // account land in somebody else's inbox.
+        refuseIfOwnerOfSomebodyElse(user, actingUserId, "The Owner's details can only be changed by the Owner.");
 
         String email = normaliseEmail(request.email());
 
@@ -210,9 +221,9 @@ public class UserService {
      * <ul>
      *   <li><b>Not yourself.</b> Suspending your own account signs you out of the
      *       only screen that could undo it.</li>
-     *   <li><b>Not the last working administrator.</b> Nothing else in this system
-     *       can create one, so an organisation that switches off its last admin
-     *       has no way back in short of editing the database by hand.</li>
+     *   <li><b>Not a working administrator.</b> Administrators cannot switch
+     *       each other off, which also means the last one can never be lost from
+     *       here. Removing an administrator is a database change, on purpose.</li>
      * </ul>
      */
     @Transactional
@@ -238,14 +249,21 @@ public class UserService {
                     "This person hasn't accepted their invitation yet. Resend it instead.");
         }
 
-        boolean losingAnActiveAdmin = user.getStatus() == UserStatus.ACTIVE
-                && status != UserStatus.ACTIVE
-                && ADMIN_ROLE.equals(user.getRole().getName());
+        // Nobody switches the Owner off — there is exactly one, and it is the
+        // account that can undo everything else here.
+        if (Roles.OWNER.equals(user.getRole().getName())) {
+            throw ApiException.forbidden("The Owner's account can't be deactivated.");
+        }
 
-        if (losingAnActiveAdmin
-                && userRepository.countByRoleNameAndStatus(ADMIN_ROLE, UserStatus.ACTIVE) <= 1) {
-            throw ApiException.conflict(
-                    "This is the last active administrator. Promote somebody else first.");
+        // Only the Owner switches an administrator off or back on — decided
+        // 2026-10-19. Administrators cannot do it to each other, so no admin can
+        // remove the others, and no admin can undo what the Owner decided.
+        // Cancelling an invitation for an admin who never joined is housekeeping,
+        // and any administrator may do it.
+        boolean adminTarget = Roles.ADMIN.equals(user.getRole().getName())
+                && user.getStatus() != UserStatus.PENDING_VERIFICATION;
+        if (adminTarget && !isOwner(actingUserId)) {
+            throw ApiException.forbidden("Only the Owner can deactivate or reactivate an administrator.");
         }
 
         user.setStatus(status);
@@ -285,8 +303,8 @@ public class UserService {
      *
      * <p>Refused on your own account. Promoting yourself needs no explanation;
      * demoting yourself takes away the permission you would need to undo it.
-     * Refused on the last active administrator for the same reason
-     * {@link #changeStatus} refuses it.
+     * Refused on any administrator: one admin cannot demote another, so nobody
+     * can quietly make themselves the only one.
      */
     @Transactional
     public UserResponse changeRole(Long id, String roleName, Long actingUserId) {
@@ -298,7 +316,22 @@ public class UserService {
         User user = userRepository.findWithRoleById(id)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
 
+        if (Roles.OWNER.equals(user.getRole().getName())) {
+            throw ApiException.forbidden("The Owner's role can't be changed.");
+        }
+
+        // Administrators' roles cannot be changed — decided 2026-10-19, and that
+        // includes by the Owner, whose extra power is deactivation only. Without
+        // it, any admin could demote every other admin and be the only one.
+        if (Roles.ADMIN.equals(user.getRole().getName())) {
+            throw ApiException.forbidden("An administrator's role can't be changed.");
+        }
+
         String wanted = roleName.trim().toUpperCase();
+
+        if (Roles.OWNER.equals(wanted)) {
+            throw ApiException.badRequest("There is only one Owner, and the role can't be given to anybody else.");
+        }
 
         if (wanted.equals(user.getRole().getName())) {
             throw ApiException.badRequest("That account already has the " + wanted + " role.");
@@ -306,15 +339,6 @@ public class UserService {
 
         Role role = roleRepository.findByNameWithPermissions(wanted)
                 .orElseThrow(() -> ApiException.badRequest("There is no role called " + roleName + "."));
-
-        boolean losingAnActiveAdmin = ADMIN_ROLE.equals(user.getRole().getName())
-                && user.getStatus() == UserStatus.ACTIVE;
-
-        if (losingAnActiveAdmin
-                && userRepository.countByRoleNameAndStatus(ADMIN_ROLE, UserStatus.ACTIVE) <= 1) {
-            throw ApiException.conflict(
-                    "This is the last active administrator. Promote somebody else first.");
-        }
 
         long cleared = userPermissionRepository.deleteByUserId(id);
 
@@ -344,6 +368,20 @@ public class UserService {
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
 
+    /** Whether the person asking is the Owner. */
+    private boolean isOwner(Long userId) {
+        return userRepository.findWithRoleById(userId)
+                .map(u -> Roles.OWNER.equals(u.getRole().getName()))
+                .orElse(false);
+    }
+
+    /** Refuses an action on the Owner's account unless the Owner is the one asking. */
+    static void refuseIfOwnerOfSomebodyElse(User target, Long actingUserId, String message) {
+        if (Roles.OWNER.equals(target.getRole().getName()) && !target.getId().equals(actingUserId)) {
+            throw ApiException.forbidden(message);
+        }
+    }
+
     /**
      * {@code field,direction} into a {@link Sort}, refusing anything unlisted.
      *
@@ -368,7 +406,8 @@ public class UserService {
                 ? Sort.Direction.DESC
                 : Sort.Direction.ASC;
 
-        return Sort.by(direction, field);
+        // "role" is a relation; the column people mean is its name.
+        return Sort.by(direction, field.equals("role") ? "role.name" : field);
     }
 
     /** Lowercase and trimmed, so Jane@x.com and jane@x.com are one account. */

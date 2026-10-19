@@ -5,6 +5,7 @@ import org.example.backend.dto.UserResponse;
 import org.example.backend.entity.Module;
 import org.example.backend.entity.Permission;
 import org.example.backend.entity.PermissionEffect;
+import org.example.backend.entity.Roles;
 import org.example.backend.entity.User;
 import org.example.backend.entity.UserPermission;
 import org.example.backend.exception.ApiException;
@@ -36,7 +37,6 @@ public class UserPermissionService {
 
     private static final Logger log = LoggerFactory.getLogger(UserPermissionService.class);
 
-    private static final String ADMIN_ROLE = "ADMIN";
 
     /** The action every other action on a module depends on. */
     private static final String VIEW_ACTION = "READ";
@@ -93,10 +93,9 @@ public class UserPermissionService {
         User user = userRepository.findWithRoleById(userId)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + userId + "."));
 
-        if (ADMIN_ROLE.equals(user.getRole().getName())) {
+        if (Roles.grantsEverything(user.getRole().getName())) {
             throw ApiException.badRequest(
-                    "Administrators hold every permission and cannot be given exceptions. "
-                            + "Change their role to Member first.");
+                    "Administrators and the Owner hold every permission and cannot be given exceptions.");
         }
 
         Map<String, Permission> catalogue = permissionsByAuthority();
