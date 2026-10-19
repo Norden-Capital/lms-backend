@@ -23,6 +23,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -77,6 +78,7 @@ public class UserService {
     private final AccessService accessService;
     private final AccountLinkService accountLinkService;
     private final AuthTokenRepository authTokenRepository;
+    private final AccountGuard accountGuard;
 
     public UserService(UserRepository userRepository,
                        RoleRepository roleRepository,
@@ -84,7 +86,8 @@ public class UserService {
                        PermissionService permissionService,
                        AccessService accessService,
                        AccountLinkService accountLinkService,
-                       AuthTokenRepository authTokenRepository) {
+                       AuthTokenRepository authTokenRepository,
+                       AccountGuard accountGuard) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.userPermissionRepository = userPermissionRepository;
@@ -92,6 +95,7 @@ public class UserService {
         this.accessService = accessService;
         this.accountLinkService = accountLinkService;
         this.authTokenRepository = authTokenRepository;
+        this.accountGuard = accountGuard;
     }
 
     /**
@@ -103,7 +107,9 @@ public class UserService {
      * @param mfaEnabled two-factor on or off, or null for either
      * @param sort       {@code field,direction} — see {@link #SORTABLE}
      * @param actingUserId left out of the results: your own account is managed
-     *                     from your settings, not from the list of other people
+     *                     from your settings, not from the list of other people.
+     *                     Unless they are the Owner, the Owner is left out too —
+     *                     nobody sees a role above their own (decided 2026-10-19).
      */
     @Transactional(readOnly = true)
     public PageResponse<UserSummaryResponse> list(String search,
@@ -121,19 +127,32 @@ public class UserService {
                 parseSort(sort)
         );
 
-        Page<User> found = userRepository.findAll(
-                UserSpecifications.matching(search, role, status, mfaEnabled)
-                        .and((root, query, builder) -> builder.notEqual(root.get("id"), actingUserId)),
-                pageable
-        );
+        Specification<User> visible = UserSpecifications.matching(search, role, status, mfaEnabled)
+                .and((root, query, builder) -> builder.notEqual(root.get("id"), actingUserId));
+
+        if (!accountGuard.isOwner(actingUserId)) {
+            visible = visible.and((root, query, builder) ->
+                    builder.notEqual(root.get("role").get("name"), Roles.OWNER));
+        }
+
+        Page<User> found = userRepository.findAll(visible, pageable);
 
         return PageResponse.from(found.map(UserSummaryResponse::from));
     }
 
-    /** One account in full, permissions included. */
+    /**
+     * One account in full, permissions included.
+     *
+     * <p>The Owner's account is not found for anybody but the Owner — the same
+     * answer as an id that does not exist, so it does not even confirm there is
+     * one to look at.
+     */
     @Transactional(readOnly = true)
-    public UserResponse get(Long id) {
+    public UserResponse get(Long id, Long actingUserId) {
         User user = userRepository.findWithRoleById(id)
+                .filter(u -> !Roles.OWNER.equals(u.getRole().getName())
+                        || u.getId().equals(actingUserId)
+                        || accountGuard.isOwner(actingUserId))
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
@@ -164,6 +183,12 @@ public class UserService {
             throw ApiException.badRequest("There is only one Owner. Invite them as an administrator or a member.");
         }
 
+        // Only the Owner makes administrators — decided 2026-10-19. Otherwise any
+        // admin could invite more admins, whom no other admin could then remove.
+        if (Roles.ADMIN.equals(roleName)) {
+            accountGuard.requireOwner(actingUserId, "Only the Owner can invite administrators.");
+        }
+
         Role role = roleRepository.findByNameWithPermissions(roleName)
                 .orElseThrow(() -> ApiException.badRequest("There is no role called " + request.role() + "."));
 
@@ -190,9 +215,9 @@ public class UserService {
         User user = userRepository.findWithRoleById(id)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
 
-        // Changing the Owner's email would let a reset link for the Owner's
-        // account land in somebody else's inbox.
-        refuseIfOwnerOfSomebodyElse(user, actingUserId, "The Owner's details can only be changed by the Owner.");
+        // Changing somebody's email is how a reset link for their account lands
+        // in another inbox — so it follows the same rule as everything else.
+        accountGuard.requireCanManage(user, actingUserId);
 
         String email = normaliseEmail(request.email());
 
@@ -249,22 +274,9 @@ public class UserService {
                     "This person hasn't accepted their invitation yet. Resend it instead.");
         }
 
-        // Nobody switches the Owner off — there is exactly one, and it is the
-        // account that can undo everything else here.
-        if (Roles.OWNER.equals(user.getRole().getName())) {
-            throw ApiException.forbidden("The Owner's account can't be deactivated.");
-        }
-
-        // Only the Owner switches an administrator off or back on — decided
-        // 2026-10-19. Administrators cannot do it to each other, so no admin can
-        // remove the others, and no admin can undo what the Owner decided.
-        // Cancelling an invitation for an admin who never joined is housekeeping,
-        // and any administrator may do it.
-        boolean adminTarget = Roles.ADMIN.equals(user.getRole().getName())
-                && user.getStatus() != UserStatus.PENDING_VERIFICATION;
-        if (adminTarget && !isOwner(actingUserId)) {
-            throw ApiException.forbidden("Only the Owner can deactivate or reactivate an administrator.");
-        }
+        // Only the Owner switches an administrator off or back on, or cancels an
+        // administrator's invitation. Nobody switches the Owner off.
+        accountGuard.requireCanManage(user, actingUserId);
 
         user.setStatus(status);
 
@@ -316,21 +328,19 @@ public class UserService {
         User user = userRepository.findWithRoleById(id)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
 
-        if (Roles.OWNER.equals(user.getRole().getName())) {
-            throw ApiException.forbidden("The Owner's role can't be changed.");
-        }
-
-        // Administrators' roles cannot be changed — decided 2026-10-19, and that
-        // includes by the Owner, whose extra power is deactivation only. Without
-        // it, any admin could demote every other admin and be the only one.
-        if (Roles.ADMIN.equals(user.getRole().getName())) {
-            throw ApiException.forbidden("An administrator's role can't be changed.");
-        }
+        // Demoting an administrator is the Owner's alone; the Owner's own role
+        // never changes.
+        accountGuard.requireCanManage(user, actingUserId);
 
         String wanted = roleName.trim().toUpperCase();
 
         if (Roles.OWNER.equals(wanted)) {
             throw ApiException.badRequest("There is only one Owner, and the role can't be given to anybody else.");
+        }
+
+        // And promoting somebody to administrator, for the reason create() gives.
+        if (Roles.ADMIN.equals(wanted)) {
+            accountGuard.requireOwner(actingUserId, "Only the Owner can make somebody an administrator.");
         }
 
         if (wanted.equals(user.getRole().getName())) {
@@ -368,20 +378,6 @@ public class UserService {
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
 
-    /** Whether the person asking is the Owner. */
-    private boolean isOwner(Long userId) {
-        return userRepository.findWithRoleById(userId)
-                .map(u -> Roles.OWNER.equals(u.getRole().getName()))
-                .orElse(false);
-    }
-
-    /** Refuses an action on the Owner's account unless the Owner is the one asking. */
-    static void refuseIfOwnerOfSomebodyElse(User target, Long actingUserId, String message) {
-        if (Roles.OWNER.equals(target.getRole().getName()) && !target.getId().equals(actingUserId)) {
-            throw ApiException.forbidden(message);
-        }
-    }
-
     /**
      * {@code field,direction} into a {@link Sort}, refusing anything unlisted.
      *
@@ -406,8 +402,14 @@ public class UserService {
                 ? Sort.Direction.DESC
                 : Sort.Direction.ASC;
 
-        // "role" is a relation; the column people mean is its name.
-        return Sort.by(direction, field.equals("role") ? "role.name" : field);
+        // "role" is a relation; the column people mean is its name. "id" is shown
+        // as the public ID, so that is what it sorts by.
+        String property = switch (field) {
+            case "role" -> "role.name";
+            case "id" -> "publicId";
+            default -> field;
+        };
+        return Sort.by(direction, property);
     }
 
     /** Lowercase and trimmed, so Jane@x.com and jane@x.com are one account. */

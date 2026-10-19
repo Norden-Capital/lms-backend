@@ -20,7 +20,8 @@ import java.util.Set;
  * was already in the database and simply not exposed.
  */
 public record UserResponse(
-        Long id,
+        /** The public ID, like NC-7K4F-92QX — never the database's numeric id. */
+        String id,
         String firstName,
         String lastName,
         String email,
@@ -50,7 +51,7 @@ public record UserResponse(
 ) {
     public static UserResponse from(User user, Set<String> permissions) {
         return new UserResponse(
-                user.getId(),
+                user.getPublicId(),
                 user.getFirstName(),
                 user.getLastName(),
                 user.getEmail(),

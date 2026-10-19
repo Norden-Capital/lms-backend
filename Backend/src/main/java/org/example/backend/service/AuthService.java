@@ -51,6 +51,7 @@ public class AuthService {
     private final TwoFactorAuthService twoFactorAuthService;
     private final EncryptionService encryptionService;
     private final PermissionService permissionService;
+    private final AccountGuard accountGuard;
 
     public AuthService(UserRepository userRepository,
                        MfaRecoveryCodeRepository recoveryCodeRepository,
@@ -58,7 +59,8 @@ public class AuthService {
                        JwtService jwtService,
                        TwoFactorAuthService twoFactorAuthService,
                        EncryptionService encryptionService,
-                       PermissionService permissionService) {
+                       PermissionService permissionService,
+                       AccountGuard accountGuard) {
         this.userRepository = userRepository;
         this.recoveryCodeRepository = recoveryCodeRepository;
         this.passwordEncoder = passwordEncoder;
@@ -66,6 +68,7 @@ public class AuthService {
         this.twoFactorAuthService = twoFactorAuthService;
         this.encryptionService = encryptionService;
         this.permissionService = permissionService;
+        this.accountGuard = accountGuard;
     }
 
     // There is no self-registration. Accounts are created by invitation only —
@@ -283,10 +286,10 @@ public class AuthService {
         User target = userRepository.findWithRoleById(targetUserId)
                 .orElseThrow(() -> ApiException.notFound("User not found."));
 
-        // The Owner's second factor is the last lock on the one account that can
-        // remove administrators. Nobody else clears it.
-        UserService.refuseIfOwnerOfSomebodyElse(target, actingUserId,
-                "Only the Owner can reset the Owner's two-factor authentication.");
+        // Clearing somebody's second factor is the last step of taking over their
+        // account, so it follows the same rule: only the Owner does it to an
+        // administrator, and nobody does it to the Owner.
+        accountGuard.requireCanManage(target, actingUserId);
 
         if (!target.isMfaEnabled() && target.getMfaSecret() == null) {
             throw ApiException.conflict("Two-factor authentication is not set up for this account.");

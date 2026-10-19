@@ -48,7 +48,9 @@ public final class UserSpecifications {
                 conditions.add(builder.or(
                         builder.like(builder.lower(root.get("firstName")), pattern),
                         builder.like(builder.lower(root.get("lastName")), pattern),
-                        builder.like(builder.lower(root.get("email")), pattern)
+                        builder.like(builder.lower(root.get("email")), pattern),
+                        // Somebody reading an ID off a screen or a ticket.
+                        builder.like(builder.lower(root.get("publicId")), pattern)
                 ));
             }
 

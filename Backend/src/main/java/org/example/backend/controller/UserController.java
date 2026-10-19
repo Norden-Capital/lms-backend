@@ -114,8 +114,9 @@ public class UserController {
     @PreAuthorize("hasAuthority('USER:READ')")
     @Operation(summary = "One user in full",
                description = "Includes their effective permissions and the account's timestamps.")
-    public ResponseEntity<UserResponse> get(@PathVariable Long id) {
-        return ResponseEntity.ok(userService.get(id));
+    public ResponseEntity<UserResponse> get(@PathVariable("id") String publicId,
+                                            @AuthenticationPrincipal AuthPrincipal principal) {
+        return ResponseEntity.ok(userService.get(internalId(publicId), principal.userId()));
     }
 
     @PostMapping
@@ -145,11 +146,11 @@ public class UserController {
                        be a way to make somebody an administrator.
 
                        All fields are required. A blank phone clears it.""")
-    public ResponseEntity<UserResponse> update(@PathVariable Long id,
+    public ResponseEntity<UserResponse> update(@PathVariable("id") String publicId,
                                                @Valid @RequestBody UpdateUserRequest request,
                                                @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(userService.update(id, request, principal.userId()));
+        return ResponseEntity.ok(userService.update(internalId(publicId), request, principal.userId()));
     }
 
     @PatchMapping("/{id}/status")
@@ -162,11 +163,11 @@ public class UserController {
 
                        Refused in two cases: on your own account, and on the last active
                        administrator. Both are ways to lock an organisation out permanently.""")
-    public ResponseEntity<UserResponse> changeStatus(@PathVariable Long id,
+    public ResponseEntity<UserResponse> changeStatus(@PathVariable("id") String publicId,
                                                      @Valid @RequestBody UpdateUserStatusRequest request,
                                                      @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(userService.changeStatus(id, request.status(), principal.userId()));
+        return ResponseEntity.ok(userService.changeStatus(internalId(publicId), request.status(), principal.userId()));
     }
 
     @PatchMapping("/{id}/role")
@@ -183,11 +184,11 @@ public class UserController {
 
                        Refused on your own account, and on the last active administrator. Both
                        are ways to lock an organisation out of its own system.""")
-    public ResponseEntity<UserResponse> changeRole(@PathVariable Long id,
+    public ResponseEntity<UserResponse> changeRole(@PathVariable("id") String publicId,
                                                    @Valid @RequestBody ChangeRoleRequest request,
                                                    @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(userService.changeRole(id, request.role(), principal.userId()));
+        return ResponseEntity.ok(userService.changeRole(internalId(publicId), request.role(), principal.userId()));
     }
 
     @PostMapping("/{id}/password-reset")
@@ -199,10 +200,10 @@ public class UserController {
 
                        Refused for an invited person who has not joined yet (resend the invitation
                        instead), for a switched-off account, and twice within a minute.""")
-    public ResponseEntity<MessageResponse> sendPasswordReset(@PathVariable Long id,
+    public ResponseEntity<MessageResponse> sendPasswordReset(@PathVariable("id") String publicId,
                                                              @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(accountLinkService.sendPasswordReset(id, principal.userId()));
+        return ResponseEntity.ok(accountLinkService.sendPasswordReset(internalId(publicId), principal.userId()));
     }
 
     @PostMapping("/{id}/invitation")
@@ -211,10 +212,10 @@ public class UserController {
                description = """
                        For an invited person who lost the email or let it expire. The old link stops
                        working. Refused once they have joined, and twice within a minute.""")
-    public ResponseEntity<MessageResponse> resendInvitation(@PathVariable Long id,
+    public ResponseEntity<MessageResponse> resendInvitation(@PathVariable("id") String publicId,
                                                             @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(accountLinkService.resendInvitation(id, principal.userId()));
+        return ResponseEntity.ok(accountLinkService.resendInvitation(internalId(publicId), principal.userId()));
     }
 
     @PutMapping("/{id}/permissions")
@@ -238,11 +239,11 @@ public class UserController {
                        Takes effect immediately — their cached access is cleared, not left to
                        expire.""")
     public ResponseEntity<UserResponse> replacePermissions(
-            @PathVariable Long id,
+            @PathVariable("id") String publicId,
             @Valid @RequestBody UpdatePermissionsRequest request,
             @AuthenticationPrincipal AuthPrincipal principal) {
 
-        return ResponseEntity.ok(userPermissionService.replaceFor(id, request, principal.userId()));
+        return ResponseEntity.ok(userPermissionService.replaceFor(internalId(publicId), request, principal.userId()));
     }
 
     @PostMapping("/{id}/2fa/reset")
@@ -258,8 +259,20 @@ public class UserController {
 
                        You cannot call this on yourself: that would be self-disable by another
                        name. Ask another administrator.""")
-    public ResponseEntity<MessageResponse> resetMfa(@PathVariable Long id,
+    public ResponseEntity<MessageResponse> resetMfa(@PathVariable("id") String publicId,
                                                     @AuthenticationPrincipal AuthPrincipal principal) {
-        return ResponseEntity.ok(authService.resetMfaFor(id, principal.userId()));
+        return ResponseEntity.ok(authService.resetMfaFor(internalId(publicId), principal.userId()));
+    }
+
+    /**
+     * Addresses carry the public ID, like NC-7K4F-92QX, never the numeric id —
+     * which would give away how many accounts exist and invite trying the next
+     * one. Everything behind the controller still works on the numeric id.
+     *
+     * <p>An unknown ID is the same 404 as an account somebody may not see.
+     */
+    private Long internalId(String publicId) {
+        return userRepository.findIdByPublicId(publicId.trim().toUpperCase())
+                .orElseThrow(() -> ApiException.notFound("No user with ID " + publicId + "."));
     }
 }

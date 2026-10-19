@@ -74,6 +74,7 @@ public class AccountLinkService {
     private final PasswordEncoder passwordEncoder;
     private final MailService mailService;
     private final AccessService accessService;
+    private final AccountGuard accountGuard;
     private final String frontendUrl;
 
     public AccountLinkService(AuthTokenRepository tokenRepository,
@@ -81,12 +82,14 @@ public class AccountLinkService {
                               PasswordEncoder passwordEncoder,
                               MailService mailService,
                               AccessService accessService,
+                              AccountGuard accountGuard,
                               @Value("${app.frontend-url}") String frontendUrl) {
         this.tokenRepository = tokenRepository;
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.mailService = mailService;
         this.accessService = accessService;
+        this.accountGuard = accountGuard;
         this.frontendUrl = frontendUrl.replaceAll("/+$", "");
     }
 
@@ -119,8 +122,11 @@ public class AccountLinkService {
     /** "Resend invite" — for somebody who lost the email, or let it expire. */
     @Transactional
     public MessageResponse resendInvitation(Long userId, Long actingUserId) {
-        User user = userRepository.findById(userId)
+        User user = userRepository.findWithRoleById(userId)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + userId + "."));
+
+        // Re-inviting an administrator is the Owner's, like inviting one.
+        accountGuard.requireCanManage(user, actingUserId);
 
         if (user.getStatus() != UserStatus.PENDING_VERIFICATION) {
             throw ApiException.badRequest("This person has already joined. Send a password reset link instead.");
@@ -208,10 +214,9 @@ public class AccountLinkService {
         User user = userRepository.findWithRoleById(userId)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + userId + "."));
 
-        // The Owner uses "Forgot password?" like anybody else; nobody sends
-        // reset links to the Owner's account on the Owner's behalf.
-        UserService.refuseIfOwnerOfSomebodyElse(user, actingUserId,
-                "Reset links for the Owner's account can only be requested by the Owner.");
+        // Only the Owner sends an administrator a reset link, and nobody sends
+        // one to the Owner — who uses "Forgot password?" like anybody else.
+        accountGuard.requireCanManage(user, actingUserId);
 
         if (user.getStatus() == UserStatus.PENDING_VERIFICATION) {
             throw ApiException.badRequest("This person hasn't joined yet. Resend the invitation instead.");

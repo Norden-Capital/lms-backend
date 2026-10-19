@@ -31,6 +31,14 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    /**
+     * What everybody outside the database sees, like {@code NC-7K4F-92QX}: on
+     * screen, in addresses, in every API response. The numeric id above never
+     * leaves the server. See {@link PublicIds}.
+     */
+    @Column(name = "public_id", nullable = false, unique = true, length = 20, updatable = false)
+    private String publicId;
+
     @Column(name = "first_name", nullable = false, length = 100)
     private String firstName;
 
@@ -118,6 +126,7 @@ public class User {
 
     @PrePersist
     void onCreate() {
+        if (publicId == null) publicId = PublicIds.generate();
         Instant now = Instant.now();
         if (createdAt == null) createdAt = now;
         updatedAt = now;

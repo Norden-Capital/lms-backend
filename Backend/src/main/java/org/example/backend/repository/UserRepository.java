@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
 
@@ -61,4 +62,8 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     /** One user with their role and its permissions, for the detail screen. */
     @EntityGraph(attributePaths = {"role", "role.permissions"})
     Optional<User> findWithRoleById(Long id);
+
+    /** The numeric id behind a public ID like NC-7K4F-92QX — how every address is resolved. */
+    @Query("select u.id from User u where u.publicId = :publicId")
+    Optional<Long> findIdByPublicId(@Param("publicId") String publicId);
 }
