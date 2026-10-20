@@ -72,6 +72,14 @@ public class SecurityConfig {
                     // for — the link is the proof. See BackupController.
                     .requestMatchers(HttpMethod.GET, "/api/backups/download").permitAll()
 
+                    // An email attachment, by the same kind of two-minute link.
+                    .requestMatchers(HttpMethod.GET, "/api/inbox/attachment").permitAll()
+
+                    // Sending an email with its files, by a two-minute pass the
+                    // backend gave someone holding INBOX:SEND. Straight from the
+                    // browser, because the website's server caps uploads at 4.5 MB.
+                    .requestMatchers(HttpMethod.POST, "/api/inbox/send").permitAll()
+
                     // The only genuinely anonymous auth endpoints. Listed one by
                     // one on purpose — a blanket /api/auth/** is what previously
                     // left 2FA setup open to the world.

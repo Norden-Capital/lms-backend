@@ -40,5 +40,9 @@ public enum ActionType {
     /** The Owner pressed "Back up now". The nightly run is not logged here. */
     BACKUP_STARTED,
     BACKUP_DOWNLOADED,
-    BACKUP_DELETED
+    BACKUP_DELETED,
+
+    // ── Inbox ─────────────────────────────────────────────────────────────
+    MAILBOX_CONNECTED,
+    MAILBOX_DISCONNECTED
 }

@@ -51,6 +51,8 @@ public class JwtService {
     public static final String TYPE_MFA_PENDING = "mfa_pending";
     public static final String TYPE_ENROLMENT_PENDING = "enrolment_pending";
     public static final String TYPE_BACKUP_DOWNLOAD = "backup_download";
+    public static final String TYPE_MAIL_ATTACHMENT = "mail_attachment";
+    public static final String TYPE_MAIL_SEND = "mail_send";
 
     /** A download link is opened straight away; two minutes is plenty. */
     private static final Duration BACKUP_DOWNLOAD_TTL = Duration.ofMinutes(2);
@@ -160,6 +162,18 @@ public class JwtService {
         return Jwts.builder()
                 .subject(backupPublicId)
                 .claim(CLAIM_TYPE, TYPE_BACKUP_DOWNLOAD)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(BACKUP_DOWNLOAD_TTL)))
+                .signWith(key)
+                .compact();
+    }
+
+    /** A two-minute link to one file, of the given kind — the subject says which file. */
+    public String generateDownloadToken(String type, String subject) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(subject)
+                .claim(CLAIM_TYPE, type)
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(BACKUP_DOWNLOAD_TTL)))
                 .signWith(key)
