@@ -1,5 +1,12 @@
 -- Brands — decided 2026-10-20.
 --
+-- Replaces V11's mail_accounts: the inbox became one Gmail mailbox set on the
+-- server (INBOX_USERNAME / INBOX_PASSWORD), the way oneBase does it, so the
+-- table of connected mailboxes is no longer used. V11 stays as it was — it
+-- already ran on the server, and Flyway refuses an edited migration.
+DROP TABLE IF EXISTS mail_accounts;
+
+--
 -- Every brand's address forwards into the one inbox mailbox (Cloudflare Email
 -- Routing). Mail sent to a brand's address is tagged with it, and answers go
 -- out from that address — which must also be in the mailbox's Gmail
