@@ -103,6 +103,7 @@ public class BackupService {
     private final String datasourceUrl;
     private final String datasourceUser;
     private final String datasourcePassword;
+    private final long cloudLimitBytes;
 
     /** One backup at a time. A second press while one runs is refused. */
     private final AtomicBoolean busy = new AtomicBoolean(false);
@@ -118,7 +119,8 @@ public class BackupService {
                          @Value("${app.backup.pg-restore:pg_restore}") String pgRestore,
                          @Value("${spring.datasource.url}") String datasourceUrl,
                          @Value("${spring.datasource.username}") String datasourceUser,
-                         @Value("${spring.datasource.password}") String datasourcePassword) {
+                         @Value("${spring.datasource.password}") String datasourcePassword,
+                         @Value("${app.backup.r2.limit-bytes:10000000000}") long cloudLimitBytes) {
         this.runRepository = runRepository;
         this.userRepository = userRepository;
         this.cloud = cloud;
@@ -131,6 +133,7 @@ public class BackupService {
         this.datasourceUrl = datasourceUrl;
         this.datasourceUser = datasourceUser;
         this.datasourcePassword = datasourcePassword;
+        this.cloudLimitBytes = cloudLimitBytes;
     }
 
     // ── Running a backup ────────────────────────────────────────────────────
@@ -387,7 +390,11 @@ public class BackupService {
                 diskUsed,
                 diskTotal,
                 days(runs, now),
-                runs.stream().anyMatch(r -> r.getOutcome() == BackupRun.Outcome.RUNNING));
+                runs.stream().anyMatch(r -> r.getOutcome() == BackupRun.Outcome.RUNNING),
+                runs.stream().filter(BackupRun::isOnServer).mapToLong(BackupRun::getSizeBytes).sum(),
+                cloud.isConfigured(),
+                runs.stream().filter(BackupRun::isInCloud).mapToLong(BackupRun::getSizeBytes).sum(),
+                cloudLimitBytes);
 
         return new BackupOverviewResponse(status, logPage(runs, sort, page, size, now));
     }

@@ -18,6 +18,10 @@ public record BackupOverviewResponse(Status status, LogPage log) {
      * @param destinationTotalBytes the same disk — its whole size
      * @param days                  oldest first, one per day, for the calendar
      * @param running               a backup is in progress right now
+     * @param serverBackupBytes     what the backups take on the server disk
+     * @param cloudConfigured       an R2 bucket is set up
+     * @param cloudBackupBytes      what the backups take in R2
+     * @param cloudLimitBytes       the R2 allowance shown on the page — the 10 GB free tier
      */
     public record Status(
             Instant lastSuccessAt,
@@ -30,7 +34,11 @@ public record BackupOverviewResponse(Status status, LogPage log) {
             long destinationUsedBytes,
             long destinationTotalBytes,
             List<Day> days,
-            boolean running
+            boolean running,
+            long serverBackupBytes,
+            boolean cloudConfigured,
+            long cloudBackupBytes,
+            long cloudLimitBytes
     ) {
     }
 
