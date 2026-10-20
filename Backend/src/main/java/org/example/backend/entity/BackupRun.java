@@ -70,6 +70,14 @@ public class BackupRun {
     @Column(length = 500)
     private String error;
 
+    /** The copy was loaded into a scratch database and its data came back. */
+    @Column(name = "restore_tested", nullable = false)
+    private boolean restoreTested;
+
+    /** What the restore test found — "Restored 12 tables, 345 rows". */
+    @Column(name = "restore_note", length = 200)
+    private String restoreNote;
+
     @Column(name = "deleted_at")
     private Instant deletedAt;
 

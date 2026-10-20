@@ -12,6 +12,8 @@ import java.time.Instant;
  * @param downloadable a file exists and can be downloaded
  * @param trigger      scheduled (the nightly run) or manual ("Back up now")
  * @param triggeredBy  who pressed "Back up now"; null for the nightly run
+ * @param restoreTested the copy was loaded into a scratch database and came back
+ * @param restoreNote  what that test found — "Restored 12 tables, 345 rows"
  */
 public record BackupRunResponse(
         String id,
@@ -24,6 +26,8 @@ public record BackupRunResponse(
         boolean downloadable,
         Instant deletedAt,
         String trigger,
-        String triggeredBy
+        String triggeredBy,
+        boolean restoreTested,
+        String restoreNote
 ) {
 }

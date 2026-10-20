@@ -52,6 +52,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   <li><b>Copy</b> — {@code pg_dump} writes the whole database to one file.</li>
  *   <li><b>Check</b> — {@code pg_restore --list} reads the file back. A copy
  *       that cannot be read is a failure, not a success.</li>
+ *   <li><b>Restore test</b> — the copy is loaded into an empty scratch
+ *       database, and its tables and rows are counted against the live
+ *       database. Only a copy whose data really comes back counts as a
+ *       success. The scratch database is dropped straight after.</li>
  *   <li><b>Keep</b> — the file stays on the server, and a second copy goes to
  *       Cloudflare R2, so losing the server does not lose the backups.</li>
  * </ol>
@@ -100,6 +104,7 @@ public class BackupService {
     private final Path directory;
     private final String pgDump;
     private final String pgRestore;
+    private final String psql;
     private final String datasourceUrl;
     private final String datasourceUser;
     private final String datasourcePassword;
@@ -117,6 +122,7 @@ public class BackupService {
                          @Value("${app.backup.directory:/backups}") String directory,
                          @Value("${app.backup.pg-dump:pg_dump}") String pgDump,
                          @Value("${app.backup.pg-restore:pg_restore}") String pgRestore,
+                         @Value("${app.backup.psql:psql}") String psql,
                          @Value("${spring.datasource.url}") String datasourceUrl,
                          @Value("${spring.datasource.username}") String datasourceUser,
                          @Value("${spring.datasource.password}") String datasourcePassword,
@@ -130,6 +136,7 @@ public class BackupService {
         this.directory = Path.of(directory);
         this.pgDump = pgDump;
         this.pgRestore = pgRestore;
+        this.psql = psql;
         this.datasourceUrl = datasourceUrl;
         this.datasourceUser = datasourceUser;
         this.datasourcePassword = datasourcePassword;
@@ -211,11 +218,13 @@ public class BackupService {
         boolean onServer = false;
         boolean inCloud = false;
         String error = null;
+        String restoreNote = null;
 
         try {
             Files.createDirectories(directory);
             dump(part);
             check(part);
+            restoreNote = restoreTest(part);
             size = Files.size(part);
             sha256 = sha256(part);
             Files.move(part, file, StandardCopyOption.ATOMIC_MOVE);
@@ -251,6 +260,7 @@ public class BackupService {
         boolean finalOnServer = onServer;
         boolean finalInCloud = inCloud;
         String finalError = error;
+        String finalNote = restoreNote;
         tx.executeWithoutResult(status -> {
             BackupRun r = runRepository.findById(runId).orElseThrow();
             r.setFinishedAt(Instant.now());
@@ -259,6 +269,8 @@ public class BackupService {
             r.setSizeBytes(finalSize);
             r.setOnServer(finalOnServer);
             r.setInCloud(finalInCloud);
+            r.setRestoreTested(finalNote != null);
+            r.setRestoreNote(finalNote);
             r.setError(finalError == null ? null : truncate(finalError, 500));
             r.setOutcome(finalError == null ? BackupRun.Outcome.SUCCEEDED : BackupRun.Outcome.FAILED);
         });
@@ -295,6 +307,99 @@ public class BackupService {
         if (!result.output().contains(" TABLE DATA ")) {
             throw new BackupFailure("The copy was made but has no data in it.");
         }
+    }
+
+    /** The scratch database the restore test loads each copy into. */
+    private static final String SCRATCH_DB = "lms_restore_test";
+
+    /**
+     * Every table in the database, and every row in them, as "tables|rows".
+     * Counted exactly, table by table — the planner's estimates can be far off
+     * on a small database.
+     */
+    private static final String COUNT_SQL =
+            "select count(*) || '|' || coalesce(sum((xpath('/row/c/text()', query_to_xml("
+            + "format('select count(*) as c from %I.%I', table_schema, table_name), "
+            + "false, true, '')))[1]::text::bigint), 0) "
+            + "from information_schema.tables "
+            + "where table_schema = 'public' and table_type = 'BASE TABLE'";
+
+    /**
+     * Loads the copy into an empty scratch database and counts what came back.
+     *
+     * <p>The live database is counted a moment later, so a few rows written
+     * in between — a sign-in, say — are allowed for: the copy must have every
+     * table, at least one account, and at least 95% of the live rows.
+     *
+     * @return what the test found, for the log — "Restored 12 tables, 345 rows"
+     */
+    private String restoreTest(Path file) throws BackupFailure {
+        Database db = database();
+        try {
+            sql(db.name(), "drop database if exists " + SCRATCH_DB, "prepare the restore test");
+            sql(db.name(), "create database " + SCRATCH_DB, "prepare the restore test");
+
+            ProcessBuilder restore = new ProcessBuilder(pgRestore,
+                    "--no-owner", "--no-privileges", "--exit-on-error",
+                    "--host", db.host(), "--port", String.valueOf(db.port()),
+                    "--username", datasourceUser, "--dbname", SCRATCH_DB)
+                    .redirectInput(file.toFile());
+            restore.environment().put("PGPASSWORD", datasourcePassword);
+            Result loaded = run(restore, "run the restore test");
+            if (loaded.exitCode() != 0) {
+                throw new BackupFailure("Restore test failed — the copy could not be loaded: "
+                        + firstLine(loaded.output()));
+            }
+
+            long[] copy = counts(sql(SCRATCH_DB, COUNT_SQL, "count the restored copy"));
+            long copyUsers = Long.parseLong(sql(SCRATCH_DB, "select count(*) from users", "count the restored copy"));
+            long[] live = counts(sql(db.name(), COUNT_SQL, "count the live database"));
+
+            if (copy[0] != live[0]) {
+                throw new BackupFailure("Restore test failed — the copy has " + copy[0]
+                        + " tables, the live database has " + live[0] + ".");
+            }
+            if (copyUsers == 0) {
+                throw new BackupFailure("Restore test failed — the copy has no accounts in it.");
+            }
+            if (copy[1] < live[1] * 0.95) {
+                throw new BackupFailure("Restore test failed — the copy has " + copy[1]
+                        + " rows, the live database has " + live[1] + ".");
+            }
+            return "Restored " + copy[0] + " tables, " + copy[1] + " rows";
+        } finally {
+            try {
+                sql(db.name(), "drop database if exists " + SCRATCH_DB, "clean up the restore test");
+            } catch (BackupFailure e) {
+                log.warn("Could not drop the restore-test database: {}", e.getMessage());
+            }
+        }
+    }
+
+    private static long[] counts(String tablesAndRows) throws BackupFailure {
+        String[] parts = tablesAndRows.split("\\|");
+        try {
+            return new long[]{Long.parseLong(parts[0]), Long.parseLong(parts[1])};
+        } catch (RuntimeException e) {
+            throw new BackupFailure("Restore test failed — could not count the rows: " + tablesAndRows);
+        }
+    }
+
+    /** One SQL statement through {@code psql}; returns its single answer. */
+    private String sql(String database, String statement, String what) throws BackupFailure {
+        Database db = database();
+        ProcessBuilder builder = new ProcessBuilder(psql,
+                "--no-psqlrc", "--tuples-only", "--no-align", "--quiet",
+                "--set", "ON_ERROR_STOP=1",
+                "--host", db.host(), "--port", String.valueOf(db.port()),
+                "--username", datasourceUser, "--dbname", database,
+                "--command", statement);
+        builder.environment().put("PGPASSWORD", datasourcePassword);
+        Result result = run(builder, what);
+        if (result.exitCode() != 0) {
+            throw new BackupFailure("Could not " + what + ": " + firstLine(result.output()));
+        }
+        return result.output().strip();
     }
 
     private record Result(int exitCode, String output) {
@@ -491,7 +596,9 @@ public class BackupService {
                 run.hasFile(),
                 run.getDeletedAt(),
                 run.getTrigger().name().toLowerCase(Locale.ROOT),
-                by == null ? null : (by.getFirstName() + " " + by.getLastName()).trim());
+                by == null ? null : (by.getFirstName() + " " + by.getLastName()).trim(),
+                run.isRestoreTested(),
+                run.getRestoreNote());
     }
 
     private static String where(boolean onServer, boolean inCloud) {
