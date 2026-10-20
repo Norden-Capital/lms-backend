@@ -216,6 +216,17 @@ public class GmailClient {
 
     // ── Folders and lists ───────────────────────────────────────────────────
 
+    /**
+     * Unread count and Gmail's next id for the Inbox, without opening it — one
+     * small STATUS call, cheap enough to ask every few seconds.
+     */
+    public MailDtos.Pulse pulse(Credentials account) {
+        return on(account, connection -> {
+            IMAPFolder inbox = folder(connection, "inbox");
+            return new MailDtos.Pulse(Math.max(0, inbox.getUnreadMessageCount()), inbox.getUIDNext());
+        });
+    }
+
     public List<MailDtos.Folder> folders(Credentials account) {
         return on(account, connection -> {
             List<MailDtos.Folder> out = new ArrayList<>();
@@ -236,7 +247,7 @@ public class GmailClient {
      * the same words that work in Gmail's search box work here.
      */
     public MailDtos.Page list(Credentials account, String folderId, String query, boolean unreadOnly,
-                              String brand, List<String> brands, int page, int size) {
+                              List<String> addresses, List<String> brands, int page, int size) {
         return on(account, connection -> {
             IMAPFolder folder = folder(connection, folderId);
             folder.open(Folder.READ_ONLY);
@@ -244,7 +255,7 @@ public class GmailClient {
                 Message[] matched;
                 int total;
                 int pageSize = Math.max(1, Math.min(size, 50));
-                SearchTerm term = searchTerm(query, unreadOnly, brand, account.email());
+                SearchTerm term = searchTerm(query, unreadOnly, addresses, account.email());
 
                 if (term == null) {
                     total = folder.getMessageCount();
@@ -271,17 +282,25 @@ public class GmailClient {
     }
 
     /**
-     * Gmail search words, narrowed to one brand: mail sent to its address — or,
-     * in Sent, from it. Forwarded mail keeps the brand address in its To line.
+     * Gmail search words, narrowed to some of our addresses: mail sent to any of
+     * them — or, in Sent, from them. Forwarded mail keeps the brand address in
+     * its To line. {@code addresses} null means no narrowing; empty means none
+     * of our addresses, so nothing matches.
      */
-    private static SearchTerm searchTerm(String query, boolean unreadOnly, String brand, String mailbox) {
+    private static SearchTerm searchTerm(String query, boolean unreadOnly, List<String> addresses, String mailbox) {
         String raw = query == null ? "" : query.strip();
-        if (brand != null && !brand.isBlank()) {
-            String address = brand.strip();
-            // Everything forwarded is "delivered to" the mailbox itself, so for its
-            // own address only the To, Cc and From lines say it was meant for it.
-            String delivered = address.equalsIgnoreCase(mailbox) ? "" : " deliveredto:" + address;
-            raw = ("{to:" + address + " cc:" + address + delivered + " from:" + address + "} " + raw).strip();
+        if (addresses != null) {
+            StringBuilder any = new StringBuilder();
+            for (String address : addresses) {
+                // Everything forwarded is "delivered to" the mailbox itself, so for
+                // its own address only the To, Cc and From lines say it was meant for it.
+                String delivered = address.equalsIgnoreCase(mailbox) ? "" : " deliveredto:" + address;
+                any.append(" to:").append(address).append(" cc:").append(address).append(delivered)
+                        .append(" from:").append(address);
+            }
+            // Gmail reads {a b c} as "any of". With no address at all, ask for one nobody has.
+            String narrow = any.isEmpty() ? "to:nobody@invalid.invalid" : "{" + any.toString().strip() + "}";
+            raw = (narrow + " " + raw).strip();
         }
         SearchTerm words = raw.isEmpty() ? null : new GmailRawSearchTerm(raw);
         SearchTerm unread = unreadOnly ? new FlagTerm(new Flags(Flags.Flag.SEEN), false) : null;

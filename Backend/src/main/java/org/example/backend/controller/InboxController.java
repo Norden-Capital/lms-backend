@@ -52,20 +52,33 @@ public class InboxController {
 
     // ── Reading ─────────────────────────────────────────────────────────────
 
+    @GetMapping("/pulse")
+    @PreAuthorize("hasAuthority('INBOX:READ')")
+    @Operation(summary = "Unread count, and whether new mail arrived",
+               description = "Cheap — for the header dot and the inbox refreshing itself. `latest` changes when a new email arrives.")
+    public MailDtos.Pulse pulse() {
+        return gmail.pulse(inbox.mailbox());
+    }
+
     @GetMapping("/messages")
     @PreAuthorize("hasAuthority('INBOX:READ')")
     @Operation(summary = "One page of a folder, newest first",
                description = """
                        `q` is Gmail's own search — anything that works in Gmail's search box works here.
-                       `brand` is one of our addresses (the mailbox or a brand): only mail sent to it
-                       (or, in Sent, from it).""")
+                       `brand` narrows to mail sent to one of our addresses (or, in Sent, from it):
+                       a brand's address, the mailbox's own, or `brands` for every brand at once.""")
     public MailDtos.Page messages(@RequestParam(defaultValue = "inbox") String folder,
                                   @RequestParam(required = false) String brand,
                                   @RequestParam(required = false) String q,
                                   @RequestParam(defaultValue = "false") boolean unread,
                                   @RequestParam(defaultValue = "1") int page,
                                   @RequestParam(defaultValue = "25") int size) {
-        return gmail.list(inbox.mailbox(), folder, q, unread, brand, inbox.brandEmails(), page, size);
+        List<String> brands = inbox.brandEmails();
+        // "brands" is every brand at once; anything else is one address.
+        List<String> addresses = brand == null || brand.isBlank() ? null
+                : brand.equals("brands") ? brands
+                : List.of(brand.strip());
+        return gmail.list(inbox.mailbox(), folder, q, unread, addresses, brands, page, size);
     }
 
     @GetMapping("/messages/{mail}")

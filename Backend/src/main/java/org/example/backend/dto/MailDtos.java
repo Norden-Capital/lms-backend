@@ -74,6 +74,16 @@ public final class MailDtos {
     public record Action(@NotBlank String action) {
     }
 
+    /**
+     * A quick look at the Inbox, asked for often — the header dot and the
+     * inbox's own refresh.
+     *
+     * @param unread unread emails in the Inbox
+     * @param latest Gmail's next id in the Inbox; it changes when a new email arrives
+     */
+    public record Pulse(int unread, long latest) {
+    }
+
     public record Link(String url) {
     }
 }
