@@ -7,6 +7,7 @@ import org.example.backend.dto.PageResponse;
 import org.example.backend.entity.ActionLog;
 import org.example.backend.entity.ActionType;
 import org.example.backend.entity.User;
+import org.example.backend.exception.ApiException;
 import org.example.backend.repository.ActionLogRepository;
 import org.example.backend.repository.UserRepository;
 import org.example.backend.security.ClientIp;
@@ -20,6 +21,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Writes and reads the action log — who did what to whom, and when. Only the
@@ -33,6 +35,16 @@ import java.util.List;
 public class ActionLogService {
 
     private static final int MAX_PAGE_SIZE = 100;
+
+    /** What the page's columns sort by, and the field behind each. */
+    private static final Map<String, String> SORTABLE = Map.of(
+            "at", "createdAt",
+            "action", "action",
+            "actor", "actorLabel",
+            "target", "targetLabel",
+            "details", "details",
+            "ip", "ip"
+    );
 
     private final ActionLogRepository logRepository;
     private final UserRepository userRepository;
@@ -68,7 +80,7 @@ public class ActionLogService {
 
     /** One page, newest first, filtered by kind and by any text in the line. */
     @Transactional(readOnly = true)
-    public PageResponse<ActionLogResponse> list(ActionType action, String search, int page, int size) {
+    public PageResponse<ActionLogResponse> list(ActionType action, String search, int page, int size, String sort) {
         Specification<ActionLog> spec = (root, query, builder) -> {
             List<Predicate> conditions = new ArrayList<>();
             if (action != null) {
@@ -89,9 +101,26 @@ public class ActionLogService {
         var found = logRepository.findAll(spec, PageRequest.of(
                 Math.max(page, 0),
                 Math.clamp(size, 1, MAX_PAGE_SIZE),
-                Sort.by(Sort.Direction.DESC, "createdAt").and(Sort.by(Sort.Direction.DESC, "id"))));
+                parseSort(sort).and(Sort.by(Sort.Direction.DESC, "id"))));
 
         return PageResponse.from(found.map(ActionLogResponse::from));
+    }
+
+    /** `field,direction`, refusing anything unlisted; newest first when absent. */
+    private static Sort parseSort(String sort) {
+        if (sort == null || sort.isBlank()) {
+            return Sort.by(Sort.Direction.DESC, "createdAt");
+        }
+        String[] parts = sort.split(",");
+        String property = SORTABLE.get(parts[0].trim());
+        if (property == null) {
+            throw ApiException.badRequest(
+                    "Cannot sort by " + parts[0].trim() + ". Allowed: " + String.join(", ", SORTABLE.keySet()) + ".");
+        }
+        Sort.Direction direction = parts.length > 1 && parts[1].trim().equalsIgnoreCase("desc")
+                ? Sort.Direction.DESC
+                : Sort.Direction.ASC;
+        return Sort.by(direction, property);
     }
 
     /** "Sarah Amrani <sarah@…>", as it reads at the moment of the action. */
