@@ -113,6 +113,11 @@ services:
       - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
 
+      # Inbox: the one Gmail mailbox every brand forwards into. The brands are on
+      # the Configuration page. Unset = the Inbox says "not set up".
+      - INBOX_USERNAME=${INBOX_USERNAME:-}
+      - INBOX_PASSWORD=${INBOX_PASSWORD:-}
+
       # By service name over the internal network. Nothing is published, so this
       # address does not exist anywhere outside this compose project.
       - DOCKER_API_URL=http://docker-socket-proxy:2375

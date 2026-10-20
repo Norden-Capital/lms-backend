@@ -116,19 +116,6 @@ public class GmailClient {
         return Session.getInstance(props);
     }
 
-    /** Signs in once to prove the address and App Password work. */
-    public void verify(String email, String password) {
-        try {
-            Store store = imapSession().getStore("gimaps");
-            store.connect(IMAP_HOST, email, password);
-            store.close();
-        } catch (AuthenticationFailedException e) {
-            throw refusedSignIn();
-        } catch (MessagingException e) {
-            throw unreachable(e);
-        }
-    }
-
     /** Drops the open connection — after a mailbox is removed, say. */
     public void forget(Long accountId) {
         Connection connection = connections.remove(accountId);
@@ -250,7 +237,7 @@ public class GmailClient {
      * the same words that work in Gmail's search box work here.
      */
     public MailDtos.Page list(Credentials account, String folderId, String query, boolean unreadOnly,
-                              int page, int size) {
+                              String brand, List<String> brands, int page, int size) {
         return on(account, connection -> {
             IMAPFolder folder = folder(connection, folderId);
             folder.open(Folder.READ_ONLY);
@@ -258,7 +245,7 @@ public class GmailClient {
                 Message[] matched;
                 int total;
                 int pageSize = Math.max(1, Math.min(size, 50));
-                SearchTerm term = searchTerm(query, unreadOnly);
+                SearchTerm term = searchTerm(query, unreadOnly, brand);
 
                 if (term == null) {
                     total = folder.getMessageCount();
@@ -267,7 +254,7 @@ public class GmailClient {
                     int end = total - (current - 1) * pageSize;
                     int start = Math.max(1, end - pageSize + 1);
                     matched = end < 1 ? new Message[0] : folder.getMessages(start, end);
-                    return new MailDtos.Page(summaries(account, folder, folderId, matched), total, current, pageSize, pages);
+                    return new MailDtos.Page(summaries(account, folder, folderId, brands, matched), total, current, pageSize, pages);
                 }
 
                 Message[] found = folder.search(term);
@@ -277,21 +264,31 @@ public class GmailClient {
                 int end = total - (current - 1) * pageSize;
                 int start = Math.max(0, end - pageSize);
                 matched = Arrays.copyOfRange(found, start, Math.max(start, end));
-                return new MailDtos.Page(summaries(account, folder, folderId, matched), total, current, pageSize, pages);
+                return new MailDtos.Page(summaries(account, folder, folderId, brands, matched), total, current, pageSize, pages);
             } finally {
                 folder.close(false);
             }
         });
     }
 
-    private static SearchTerm searchTerm(String query, boolean unreadOnly) {
-        SearchTerm words = query == null || query.isBlank() ? null : new GmailRawSearchTerm(query.strip());
+    /**
+     * Gmail search words, narrowed to one brand: mail sent to its address — or,
+     * in Sent, from it. Forwarded mail keeps the brand address in its To line.
+     */
+    private static SearchTerm searchTerm(String query, boolean unreadOnly, String brand) {
+        String raw = query == null ? "" : query.strip();
+        if (brand != null && !brand.isBlank()) {
+            String address = brand.strip();
+            raw = ("{to:" + address + " cc:" + address + " deliveredto:" + address + " from:" + address + "} " + raw).strip();
+        }
+        SearchTerm words = raw.isEmpty() ? null : new GmailRawSearchTerm(raw);
         SearchTerm unread = unreadOnly ? new FlagTerm(new Flags(Flags.Flag.SEEN), false) : null;
         if (words != null && unread != null) return new AndTerm(words, unread);
         return words != null ? words : unread;
     }
 
-    private List<MailDtos.Summary> summaries(Credentials account, IMAPFolder folder, String folderId, Message[] messages)
+    private List<MailDtos.Summary> summaries(Credentials account, IMAPFolder folder, String folderId,
+                                             List<String> brands, Message[] messages)
             throws MessagingException {
         if (messages.length == 0) return List.of();
 
@@ -331,7 +328,8 @@ public class GmailClient {
                     message.isSet(Flags.Flag.SEEN),
                     message.isSet(Flags.Flag.FLAGGED),
                     hasAttachments,
-                    labels(message)));
+                    labels(message),
+                    brandOf(message, brands)));
         }
         return out;
     }
@@ -372,7 +370,7 @@ public class GmailClient {
     }
 
     /** Opens a message and marks it as read in Gmail. */
-    public MailDtos.Message open(Credentials account, String mailId) {
+    public MailDtos.Message open(Credentials account, String mailId, List<String> brands) {
         MailRef ref = ref(mailId);
         return on(account, connection -> {
             IMAPFolder folder = folder(connection, ref.folderId());
@@ -401,7 +399,8 @@ public class GmailClient {
                         labels(message),
                         body.attachments,
                         header(message, "Message-ID"),
-                        ref.folderId());
+                        ref.folderId(),
+                        brandOf(message, brands));
             } finally {
                 folder.close(false);
             }
@@ -485,8 +484,9 @@ public class GmailClient {
 
     // ── Sending ─────────────────────────────────────────────────────────────
 
-    public record Outgoing(String to, String cc, String bcc, String subject, String body,
-                           String mode, String originalId, List<MultipartFile> files) {
+    /** {@code fromName}/{@code fromEmail} — the mailbox or one of its brand addresses, already checked. */
+    public record Outgoing(String fromName, String fromEmail, String to, String cc, String bcc, String subject,
+                           String body, String mode, String originalId, List<MultipartFile> files) {
     }
 
     /** Sends through Gmail — or, with {@code draft}, saves it to Drafts instead. */
@@ -498,7 +498,7 @@ public class GmailClient {
 
         try {
             MimeMessage message = new MimeMessage(smtpSession());
-            message.setFrom(new InternetAddress(account.email(), account.label(), "UTF-8"));
+            message.setFrom(new InternetAddress(mail.fromEmail(), mail.fromName(), "UTF-8"));
             InternetAddress[] to = parse(mail.to(), "To");
             if (to.length == 0 && !draft) throw ApiException.badRequest("Add at least one person to send to.");
             message.setRecipients(Message.RecipientType.TO, to);
@@ -742,6 +742,33 @@ public class GmailClient {
             return new Party("To: " + (name == null || name.isBlank() ? email : name), email);
         }
         return new Party("To: " + to[0], to[0].toString());
+    }
+
+    /**
+     * Which brand a message belongs to: the first brand address among its
+     * recipients — where Cloudflare delivered it from — or its sender, for mail
+     * sent from a brand.
+     */
+    private static String brandOf(Message message, List<String> brands) {
+        if (brands == null || brands.isEmpty()) return null;
+        try {
+            List<Address> seen = new ArrayList<>();
+            for (Message.RecipientType type : new Message.RecipientType[]{Message.RecipientType.TO, Message.RecipientType.CC}) {
+                Address[] list = message.getRecipients(type);
+                if (list != null) seen.addAll(Arrays.asList(list));
+            }
+            Address[] from = message.getFrom();
+            if (from != null) seen.addAll(Arrays.asList(from));
+            for (Address address : seen) {
+                if (address instanceof InternetAddress ia && ia.getAddress() != null) {
+                    String email = ia.getAddress().toLowerCase(Locale.ROOT);
+                    if (brands.contains(email)) return email;
+                }
+            }
+        } catch (MessagingException ignored) {
+            // No brand, then.
+        }
+        return null;
     }
 
     private static List<String> addresses(Address[] addresses) {

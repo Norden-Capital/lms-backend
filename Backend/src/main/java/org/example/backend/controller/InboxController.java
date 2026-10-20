@@ -5,16 +5,13 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.example.backend.dto.MailDtos;
-import org.example.backend.security.AuthPrincipal;
 import org.example.backend.service.GmailClient;
 import org.example.backend.service.InboxService;
 import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -22,15 +19,15 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 /**
- * The inbox — connected Gmail mailboxes, read and answered live.
+ * The inbox — one Gmail mailbox, set on the server, that every brand address
+ * forwards into; read and answered live.
  *
  * <p>Each verb is its own permission (INBOX:READ, SEND, ARCHIVE, DELETE, STAR),
- * so a member can be given reading without sending. Connecting a mailbox is
- * the Owner's alone. Every message call names the mailbox it is about.
+ * so a member can be given reading without sending.
  */
 @RestController
 @RequestMapping("/api/inbox")
-@Tag(name = "Inbox", description = "Connected Gmail mailboxes")
+@Tag(name = "Inbox", description = "The Gmail mailbox every brand forwards into")
 @SecurityRequirement(name = "BearerAuth")
 public class InboxController {
 
@@ -42,68 +39,43 @@ public class InboxController {
         this.gmail = gmail;
     }
 
-    // ── Mailboxes ───────────────────────────────────────────────────────────
-
-    @GetMapping("/accounts")
+    @GetMapping
     @PreAuthorize("hasAuthority('INBOX:READ')")
-    @Operation(summary = "The connected mailboxes")
-    public List<MailDtos.Account> accounts() {
-        return inbox.list();
-    }
-
-    @PostMapping("/accounts")
-    @PreAuthorize("hasRole('OWNER')")
-    @Operation(summary = "Connect a Gmail mailbox with its App Password — the Owner only",
-               description = "Signs in to Gmail first; a wrong App Password is refused with 400.")
-    public ResponseEntity<MailDtos.Account> connect(@Valid @RequestBody MailDtos.ConnectAccount request,
-                                                    @AuthenticationPrincipal AuthPrincipal principal) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(inbox.connect(request, principal.userId()));
-    }
-
-    @DeleteMapping("/accounts/{account}")
-    @PreAuthorize("hasRole('OWNER')")
-    @Operation(summary = "Disconnect a mailbox — the Owner only. Nothing in Gmail is touched.")
-    public ResponseEntity<Void> disconnect(@PathVariable String account,
-                                           @AuthenticationPrincipal AuthPrincipal principal) {
-        inbox.disconnect(account, principal.userId());
-        return ResponseEntity.noContent().build();
+    @Operation(summary = "The mailbox, its brands, the From addresses and the folders with unread counts",
+               description = "503 when the server has no mailbox set up (INBOX_USERNAME / INBOX_PASSWORD).")
+    public MailDtos.Overview overview() {
+        return inbox.overview();
     }
 
     // ── Reading ─────────────────────────────────────────────────────────────
 
-    @GetMapping("/{account}/folders")
-    @PreAuthorize("hasAuthority('INBOX:READ')")
-    @Operation(summary = "The folders, with unread counts for the Inbox and Junk")
-    public List<MailDtos.Folder> folders(@PathVariable String account) {
-        return gmail.folders(inbox.credentials(account));
-    }
-
-    @GetMapping("/{account}/messages")
+    @GetMapping("/messages")
     @PreAuthorize("hasAuthority('INBOX:READ')")
     @Operation(summary = "One page of a folder, newest first",
-               description = "`q` is Gmail's own search — anything that works in Gmail's search box works here.")
-    public MailDtos.Page messages(@PathVariable String account,
-                                  @RequestParam(defaultValue = "inbox") String folder,
+               description = """
+                       `q` is Gmail's own search — anything that works in Gmail's search box works here.
+                       `brand` is a brand address: only mail sent to it (or, in Sent, from it).""")
+    public MailDtos.Page messages(@RequestParam(defaultValue = "inbox") String folder,
+                                  @RequestParam(required = false) String brand,
                                   @RequestParam(required = false) String q,
                                   @RequestParam(defaultValue = "false") boolean unread,
                                   @RequestParam(defaultValue = "1") int page,
                                   @RequestParam(defaultValue = "25") int size) {
-        return gmail.list(inbox.credentials(account), folder, q, unread, page, size);
+        return gmail.list(inbox.mailbox(), folder, q, unread, brand, inbox.brandEmails(), page, size);
     }
 
-    @GetMapping("/{account}/messages/{mail}")
+    @GetMapping("/messages/{mail}")
     @PreAuthorize("hasAuthority('INBOX:READ')")
     @Operation(summary = "One message, open — marks it as read in Gmail")
-    public MailDtos.Message message(@PathVariable String account, @PathVariable String mail) {
-        return gmail.open(inbox.credentials(account), mail);
+    public MailDtos.Message message(@PathVariable String mail) {
+        return gmail.open(inbox.mailbox(), mail, inbox.brandEmails());
     }
 
-    @PostMapping("/{account}/messages/{mail}/attachments/{index}/link")
+    @PostMapping("/messages/{mail}/attachments/{index}/link")
     @PreAuthorize("hasAuthority('INBOX:READ')")
     @Operation(summary = "A two-minute download link for one attached file")
-    public MailDtos.Link attachmentLink(@PathVariable String account, @PathVariable String mail,
-                                        @PathVariable int index) {
-        return new MailDtos.Link(inbox.attachmentLink(account, mail, index));
+    public MailDtos.Link attachmentLink(@PathVariable String mail, @PathVariable int index) {
+        return new MailDtos.Link(inbox.attachmentLink(mail, index));
     }
 
     @GetMapping("/attachment")
@@ -128,7 +100,7 @@ public class InboxController {
 
     // ── Organising ──────────────────────────────────────────────────────────
 
-    @PostMapping("/{account}/messages/{mail}/actions")
+    @PostMapping("/messages/{mail}/actions")
     @Operation(summary = "Archive, move to the Inbox, junk, delete, star or mark read",
                description = """
                        `action` is one of archive, inbox, junk, delete, star, unstar, read, unread.
@@ -142,20 +114,19 @@ public class InboxController {
               : #request.action() == 'delete' ? hasAuthority('INBOX:DELETE')
               : (#request.action() == 'star' or #request.action() == 'unstar') ? hasAuthority('INBOX:STAR')
               : true)""")
-    public ResponseEntity<Void> act(@PathVariable String account, @PathVariable String mail,
-                                    @Valid @RequestBody MailDtos.Action request) {
-        gmail.act(inbox.credentials(account), mail, request.action());
+    public ResponseEntity<Void> act(@PathVariable String mail, @Valid @RequestBody MailDtos.Action request) {
+        gmail.act(inbox.mailbox(), mail, request.action());
         return ResponseEntity.noContent().build();
     }
 
     // ── Sending ─────────────────────────────────────────────────────────────
 
-    @PostMapping("/{account}/send-link")
+    @PostMapping("/send-link")
     @PreAuthorize("hasAuthority('INBOX:SEND')")
-    @Operation(summary = "A two-minute pass to send one email from this mailbox",
+    @Operation(summary = "A two-minute pass to send one email",
                description = "The browser then posts the email to /api/inbox/send with it.")
-    public MailDtos.Link sendLink(@PathVariable String account) {
-        return new MailDtos.Link(inbox.sendLink(account));
+    public MailDtos.Link sendLink() {
+        return new MailDtos.Link(inbox.sendLink());
     }
 
     @PostMapping(value = "/send", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -166,8 +137,10 @@ public class InboxController {
                        all, Gmail's limit). `mode` is new, reply, replyAll or forward; for the last
                        three `original` is the id of the message being answered — replies are
                        threaded in Gmail, and a forward carries the original's files. `draft=true`
-                       saves to Drafts instead of sending.""")
+                       saves to Drafts instead of sending. `from` is the mailbox or one of its brand
+                       addresses (Configuration → Brands); left out, the mailbox's own.""")
     public ResponseEntity<Void> send(@RequestParam String token,
+                                     @RequestParam(required = false) String from,
                                      @RequestParam(required = false) String to,
                                      @RequestParam(required = false) String cc,
                                      @RequestParam(required = false) String bcc,
@@ -177,8 +150,10 @@ public class InboxController {
                                      @RequestParam(required = false) String original,
                                      @RequestParam(defaultValue = "false") boolean draft,
                                      @RequestParam(required = false) List<MultipartFile> files) {
-        gmail.send(inbox.sendCredentials(token),
-                new GmailClient.Outgoing(to, cc, bcc, subject, body, mode, original, files), draft);
+        inbox.checkSendPass(token);
+        MailDtos.Sender sender = inbox.sender(from);
+        gmail.send(inbox.mailbox(), new GmailClient.Outgoing(sender.name(), sender.email(), to, cc, bcc, subject,
+                body, mode, original, files), draft);
         return ResponseEntity.noContent().build();
     }
 }

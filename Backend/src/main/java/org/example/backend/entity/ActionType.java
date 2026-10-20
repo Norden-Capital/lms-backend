@@ -42,7 +42,8 @@ public enum ActionType {
     BACKUP_DOWNLOADED,
     BACKUP_DELETED,
 
-    // ── Inbox ─────────────────────────────────────────────────────────────
-    MAILBOX_CONNECTED,
-    MAILBOX_DISCONNECTED
+    // ── Configuration ─────────────────────────────────────────────────────
+    BRAND_ADDED,
+    BRAND_UPDATED,
+    BRAND_REMOVED
 }
