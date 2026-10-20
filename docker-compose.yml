@@ -102,6 +102,10 @@ services:
       - SPRING_MAIL_USERNAME=${SPRING_MAIL_USERNAME:-}
       - SPRING_MAIL_PASSWORD=${SPRING_MAIL_PASSWORD:-}
 
+      # Shared with the website (Vercel), so it can pass on each visitor's real
+      # address for rate limits and the action log. See application.properties.
+      - PROXY_SECRET=${PROXY_SECRET:-}
+
       # By service name over the internal network. Nothing is published, so this
       # address does not exist anywhere outside this compose project.
       - DOCKER_API_URL=http://docker-socket-proxy:2375

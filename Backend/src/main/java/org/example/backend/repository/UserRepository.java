@@ -19,15 +19,6 @@ public interface UserRepository extends JpaRepository<User, Long>, JpaSpecificat
     boolean existsByEmail(String email);
 
     /**
-     * Whether the email is taken by <em>somebody else</em>.
-     *
-     * <p>Needed on update, where the account being edited already holds the
-     * address it is being saved with — {@code existsByEmail} would reject every
-     * save that did not change it.
-     */
-    boolean existsByEmailAndIdNot(String email, Long id);
-
-    /**
      * How many accounts in a role are in a given state.
      *
      * <p>Used for one thing: refusing to switch off the last working

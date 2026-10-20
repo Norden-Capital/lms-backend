@@ -85,6 +85,14 @@ public class User {
      * Proof the QR was actually scanned and a code worked. Without this, enabling
      * 2FA at sign-up locks people out forever if they close the tab before scanning.
      */
+    /**
+     * The last 30-second step a two-factor code was accepted for. A code from
+     * this step or earlier is refused, so each code works once. Cleared with
+     * the secret.
+     */
+    @Column(name = "mfa_last_used_step")
+    private Long mfaLastUsedStep;
+
     @Column(name = "mfa_confirmed_at")
     private Instant mfaConfirmedAt;
 

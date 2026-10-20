@@ -6,6 +6,7 @@ import org.example.backend.dto.PageResponse;
 import org.example.backend.dto.UpdateUserRequest;
 import org.example.backend.dto.UserResponse;
 import org.example.backend.dto.UserSummaryResponse;
+import org.example.backend.entity.ActionType;
 import org.example.backend.entity.AuthToken;
 import org.example.backend.entity.Role;
 import org.example.backend.entity.Roles;
@@ -79,6 +80,7 @@ public class UserService {
     private final AccountLinkService accountLinkService;
     private final AuthTokenRepository authTokenRepository;
     private final AccountGuard accountGuard;
+    private final ActionLogService actionLog;
 
     public UserService(UserRepository userRepository,
                        RoleRepository roleRepository,
@@ -87,7 +89,8 @@ public class UserService {
                        AccessService accessService,
                        AccountLinkService accountLinkService,
                        AuthTokenRepository authTokenRepository,
-                       AccountGuard accountGuard) {
+                       AccountGuard accountGuard,
+                       ActionLogService actionLog) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
         this.userPermissionRepository = userPermissionRepository;
@@ -96,6 +99,7 @@ public class UserService {
         this.accountLinkService = accountLinkService;
         this.authTokenRepository = authTokenRepository;
         this.accountGuard = accountGuard;
+        this.actionLog = actionLog;
     }
 
     /**
@@ -205,35 +209,34 @@ public class UserService {
         userRepository.save(user);
         accountLinkService.sendInvitation(user, actingUserId);
         log.info("User id={} invited account id={} with role {}", actingUserId, user.getId(), roleName);
+        actionLog.record(ActionType.USER_INVITED, actingUserId, user, "As " + roleLabel(roleName));
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
 
-    /** Editing name, email and phone. Nothing here touches what they may do. */
+    /** Editing name and phone. The email never changes; nothing here touches what they may do. */
     @Transactional
     public UserResponse update(Long id, UpdateUserRequest request, Long actingUserId) {
         User user = userRepository.findWithRoleById(id)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
 
-        // Changing somebody's email is how a reset link for their account lands
-        // in another inbox — so it follows the same rule as everything else.
         accountGuard.requireCanManage(user, actingUserId);
 
-        String email = normaliseEmail(request.email());
-
-        // Against everyone except this account, which of course already holds the
-        // address it is being saved with.
-        if (userRepository.existsByEmailAndIdNot(email, id)) {
-            throw ApiException.conflict("Another account already uses this email.");
-        }
+        // The email is not here on purpose: it cannot be changed (see
+        // UpdateUserRequest).
+        String before = user.fullName() + ", phone " + orNone(user.getPhone());
 
         user.setFirstName(request.firstName().trim());
         user.setLastName(request.lastName().trim());
-        user.setEmail(email);
         user.setPhone(blankToNull(request.phone()));
+
+        String after = user.fullName() + ", phone " + orNone(user.getPhone());
 
         userRepository.save(user);
         log.info("User id={} updated account id={}", actingUserId, id);
+        if (!before.equals(after)) {
+            actionLog.record(ActionType.DETAILS_UPDATED, actingUserId, user, before + " → " + after);
+        }
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
@@ -278,6 +281,7 @@ public class UserService {
         // administrator's invitation. Nobody switches the Owner off.
         accountGuard.requireCanManage(user, actingUserId);
 
+        UserStatus previous = user.getStatus();
         user.setStatus(status);
 
         // Switching an account off ends its sessions rather than waiting for the
@@ -293,6 +297,13 @@ public class UserService {
         userRepository.save(user);
         accessService.invalidate(id);
         log.info("User id={} set account id={} to {}", actingUserId, id, status);
+        actionLog.record(
+                previous == UserStatus.PENDING_VERIFICATION
+                        ? ActionType.INVITATION_CANCELLED
+                        : status == UserStatus.ACTIVE
+                                ? ActionType.ACCOUNT_REACTIVATED
+                                : ActionType.ACCOUNT_DEACTIVATED,
+                actingUserId, user, null);
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
@@ -352,6 +363,7 @@ public class UserService {
 
         long cleared = userPermissionRepository.deleteByUserId(id);
 
+        String previousRole = user.getRole().getName();
         user.setRole(role);
 
         // A role change ends their sessions, and that is not merely tidiness.
@@ -374,6 +386,9 @@ public class UserService {
 
         log.info("User id={} changed account id={} to role {}, clearing {} permission exception(s)",
                 actingUserId, id, wanted, cleared);
+        actionLog.record(ActionType.ROLE_CHANGED, actingUserId, user,
+                roleLabel(previousRole) + " → " + roleLabel(wanted)
+                        + (cleared > 0 ? " (" + cleared + " personal permission(s) cleared)" : ""));
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }
@@ -410,6 +425,19 @@ public class UserService {
             default -> field;
         };
         return Sort.by(direction, property);
+    }
+
+    /** How a role reads in the action log. */
+    private static String roleLabel(String role) {
+        return switch (role) {
+            case Roles.OWNER -> "Owner";
+            case Roles.ADMIN -> "Administrator";
+            default -> "Member";
+        };
+    }
+
+    private static String orNone(String value) {
+        return value == null ? "none" : value;
     }
 
     /** Lowercase and trimmed, so Jane@x.com and jane@x.com are one account. */

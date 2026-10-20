@@ -4,6 +4,7 @@ import org.example.backend.dto.UpdatePermissionsRequest;
 import org.example.backend.dto.UserResponse;
 import org.example.backend.entity.Module;
 import org.example.backend.entity.Permission;
+import org.example.backend.entity.ActionType;
 import org.example.backend.entity.PermissionEffect;
 import org.example.backend.entity.Roles;
 import org.example.backend.entity.User;
@@ -47,19 +48,22 @@ public class UserPermissionService {
     private final ModuleRepository moduleRepository;
     private final PermissionService permissionService;
     private final AccessService accessService;
+    private final ActionLogService actionLog;
 
     public UserPermissionService(UserRepository userRepository,
                                  PermissionRepository permissionRepository,
                                  UserPermissionRepository userPermissionRepository,
                                  ModuleRepository moduleRepository,
                                  PermissionService permissionService,
-                                 AccessService accessService) {
+                                 AccessService accessService,
+                                 ActionLogService actionLog) {
         this.userRepository = userRepository;
         this.permissionRepository = permissionRepository;
         this.userPermissionRepository = userPermissionRepository;
         this.moduleRepository = moduleRepository;
         this.permissionService = permissionService;
         this.accessService = accessService;
+        this.actionLog = actionLog;
     }
 
     /**
@@ -149,6 +153,11 @@ public class UserPermissionService {
 
         log.info("User id={} set {} grant(s) and {} deny/denies on account id={}",
                 actingUserId, granted.size(), denied.size(), userId);
+        actionLog.record(ActionType.PERMISSIONS_CHANGED, actingUserId, user,
+                granted.isEmpty() && denied.isEmpty()
+                        ? "Personal permissions cleared"
+                        : "Granted: " + (granted.isEmpty() ? "none" : String.join(", ", new TreeSet<>(granted)))
+                                + "; denied: " + (denied.isEmpty() ? "none" : String.join(", ", new TreeSet<>(denied))));
 
         return UserResponse.from(user, permissionService.effectivePermissionsFor(user));
     }

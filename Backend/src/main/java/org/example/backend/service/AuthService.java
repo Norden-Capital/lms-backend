@@ -3,6 +3,7 @@ package org.example.backend.service;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import org.example.backend.dto.*;
+import org.example.backend.entity.ActionType;
 import org.example.backend.entity.MfaRecoveryCode;
 import org.example.backend.entity.User;
 import org.example.backend.exception.ApiException;
@@ -19,6 +20,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 
 /**
@@ -52,6 +54,7 @@ public class AuthService {
     private final EncryptionService encryptionService;
     private final PermissionService permissionService;
     private final AccountGuard accountGuard;
+    private final ActionLogService actionLog;
 
     public AuthService(UserRepository userRepository,
                        MfaRecoveryCodeRepository recoveryCodeRepository,
@@ -60,7 +63,8 @@ public class AuthService {
                        TwoFactorAuthService twoFactorAuthService,
                        EncryptionService encryptionService,
                        PermissionService permissionService,
-                       AccountGuard accountGuard) {
+                       AccountGuard accountGuard,
+                       ActionLogService actionLog) {
         this.userRepository = userRepository;
         this.recoveryCodeRepository = recoveryCodeRepository;
         this.passwordEncoder = passwordEncoder;
@@ -69,6 +73,7 @@ public class AuthService {
         this.encryptionService = encryptionService;
         this.permissionService = permissionService;
         this.accountGuard = accountGuard;
+        this.actionLog = actionLog;
     }
 
     // There is no self-registration. Accounts are created by invitation only —
@@ -76,7 +81,13 @@ public class AuthService {
 
     // ── Login, step one: password ───────────────────────────────────────────
 
-    @Transactional
+    /**
+     * <p>noRollbackFor is what makes the lockout work. A wrong password throws,
+     * and a throw rolls the transaction back — taking the failed-attempt count
+     * with it. Until 2026-10-19 that meant the count never rose and nobody was
+     * ever locked out; the action log's lines would have vanished the same way.
+     */
+    @Transactional(noRollbackFor = ApiException.class)
     public LoginResponse login(LoginRequest request) {
         String email = normaliseEmail(request.email());
         Optional<User> found = userRepository.findByEmailWithRolePermissions(email);
@@ -85,18 +96,21 @@ public class AuthService {
             // Hash anyway so a missing account doesn't answer measurably faster
             // than a wrong password.
             passwordEncoder.encode(request.password());
+            actionLog.record(ActionType.SIGN_IN_FAILED, (User) null, null,
+                    "No account for " + email);
             throw ApiException.unauthorized(GENERIC_LOGIN_FAILURE);
         }
 
         User user = found.get();
 
         if (user.isLocked()) {
+            actionLog.record(ActionType.SIGN_IN_FAILED, (User) null, user, "Tried while locked");
             throw ApiException.locked(
                     "Too many failed attempts. This account is locked until " + user.getLockedUntil() + ".");
         }
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            registerFailedAttempt(user);
+            registerFailedAttempt(user, "Wrong password");
             throw ApiException.unauthorized(GENERIC_LOGIN_FAILURE);
         }
 
@@ -125,6 +139,7 @@ public class AuthService {
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         userRepository.save(user);
+        actionLog.record(ActionType.SIGN_IN, user, null, "Password — two-factor set-up still to do");
 
         // No permissions passed to UserResponse: what this person can currently do
         // is nothing, and saying otherwise would have the frontend render an app
@@ -137,7 +152,8 @@ public class AuthService {
 
     // ── Login, step two: the second factor ──────────────────────────────────
 
-    @Transactional
+    /** noRollbackFor for the same reason as {@link #login}: the lockout must save. */
+    @Transactional(noRollbackFor = ApiException.class)
     public LoginResponse loginTwoFactor(LoginTwoFactorRequest request) {
         Claims claims;
         try {
@@ -150,27 +166,41 @@ public class AuthService {
                 .orElseThrow(() -> ApiException.unauthorized("This login session is no longer valid."));
 
         if (user.isLocked()) {
+            actionLog.record(ActionType.SIGN_IN_FAILED, (User) null, user, "Tried while locked");
             throw ApiException.locked(
                     "Too many failed attempts. This account is locked until " + user.getLockedUntil() + ".");
         }
 
-        boolean verified;
         if (request.hasRecoveryCode()) {
-            verified = redeemRecoveryCode(user, request.recoveryCode());
-        } else if (request.hasCode()) {
-            verified = twoFactorAuthService.isCodeValid(decryptedSecret(user), request.code());
-        } else {
+            if (!redeemRecoveryCode(user, request.recoveryCode())) {
+                registerFailedAttempt(user, "Wrong recovery code");
+                throw ApiException.unauthorized("That code is not valid.");
+            }
+            actionLog.record(ActionType.RECOVERY_CODE_USED, user, null, null);
+            return completeLogin(user, "Recovery code");
+        }
+
+        if (!request.hasCode()) {
             throw ApiException.badRequest("Provide either the 6-digit code or a recovery code.");
         }
 
-        if (!verified) {
-            // Counts towards the same lockout as passwords — a 6-digit code is
-            // otherwise well within reach of brute force.
-            registerFailedAttempt(user);
+        // Counts towards the same lockout as passwords — a 6-digit code is
+        // otherwise well within reach of brute force.
+        OptionalLong step = twoFactorAuthService.matchingStep(decryptedSecret(user), request.code());
+        if (step.isEmpty()) {
+            registerFailedAttempt(user, "Wrong two-factor code");
             throw ApiException.unauthorized("That code is not valid.");
         }
+        // Single use: a code from a step already accepted is refused, so a code
+        // somebody saw cannot be replayed. Counted as a failure — a replay is
+        // not an innocent mistake.
+        if (user.getMfaLastUsedStep() != null && step.getAsLong() <= user.getMfaLastUsedStep()) {
+            registerFailedAttempt(user, "Two-factor code used twice");
+            throw ApiException.unauthorized("That code has already been used. Wait for the next one in your app.");
+        }
+        user.setMfaLastUsedStep(step.getAsLong());
 
-        return completeLogin(user);
+        return completeLogin(user, "Two-factor code");
     }
 
     // ── Two-factor setup ────────────────────────────────────────────────────
@@ -192,6 +222,7 @@ public class AuthService {
         String secret = twoFactorAuthService.generateSecret();
         user.setMfaSecret(encryptionService.encrypt(secret));
         user.setMfaConfirmedAt(null);
+        user.setMfaLastUsedStep(null);
         userRepository.save(user);
 
         // Note what is NOT set here: mfaEnabled stays false until a code is
@@ -209,13 +240,17 @@ public class AuthService {
         if (user.isMfaEnabled()) {
             throw ApiException.conflict("Two-factor authentication is already enabled.");
         }
-        if (!twoFactorAuthService.isCodeValid(decryptedSecret(user), request.code())) {
+        OptionalLong step = twoFactorAuthService.matchingStep(decryptedSecret(user), request.code());
+        if (step.isEmpty()) {
             throw ApiException.badRequest("That code is not valid. Check your authenticator app and try again.");
         }
 
         user.setMfaEnabled(true);
         user.setMfaConfirmedAt(Instant.now());
+        // The code that switched it on is spent: it cannot also sign in.
+        user.setMfaLastUsedStep(step.getAsLong());
         userRepository.save(user);
+        actionLog.record(ActionType.TWO_FACTOR_ENABLED, user, null, null);
 
         List<String> recoveryCodes = issueRecoveryCodes(user);
         log.info("Enabled 2FA for user id={}", user.getId());
@@ -298,8 +333,10 @@ public class AuthService {
         target.setMfaEnabled(false);
         target.setMfaSecret(null);
         target.setMfaConfirmedAt(null);
+        target.setMfaLastUsedStep(null);
         userRepository.save(target);
         recoveryCodeRepository.deleteByUserId(target.getId());
+        actionLog.record(ActionType.TWO_FACTOR_RESET, actingUserId, target, null);
 
         log.warn("2FA RESET: user id={} ({}) had their second factor cleared by admin id={}",
                 target.getId(), target.getEmail(), actingUserId);
@@ -320,6 +357,8 @@ public class AuthService {
             throw ApiException.conflict("Two-factor authentication is not enabled.");
         }
 
+        actionLog.record(ActionType.RECOVERY_CODES_REGENERATED, user, null, null);
+
         // No token here: this caller already holds a working one.
         return MfaConfirmResponse.codesOnly(
                 "New recovery codes generated. Your previous codes no longer work.",
@@ -328,11 +367,12 @@ public class AuthService {
 
     // ── Internals ───────────────────────────────────────────────────────────
 
-    private LoginResponse completeLogin(User user) {
+    private LoginResponse completeLogin(User user, String how) {
         user.setFailedLoginAttempts(0);
         user.setLockedUntil(null);
         user.setLastLoginAt(Instant.now());
         userRepository.save(user);
+        actionLog.record(ActionType.SIGN_IN, user, null, how);
 
         Set<String> permissions = permissionService.effectivePermissionsFor(user);
 
@@ -342,13 +382,20 @@ public class AuthService {
                 UserResponse.from(user, permissions));
     }
 
-    private void registerFailedAttempt(User user) {
+    private void registerFailedAttempt(User user, String why) {
         int attempts = user.getFailedLoginAttempts() + 1;
         user.setFailedLoginAttempts(attempts);
+        actionLog.record(ActionType.SIGN_IN_FAILED, (User) null, user, why);
 
         if (attempts >= MAX_FAILED_ATTEMPTS) {
             user.setLockedUntil(Instant.now().plus(LOCK_DURATION));
+            // Starts again from zero once the lock runs out — five more tries,
+            // not one.
+            user.setFailedLoginAttempts(0);
             log.warn("Locked user id={} after {} failed attempts", user.getId(), attempts);
+            actionLog.record(ActionType.ACCOUNT_LOCKED, (User) null, user,
+                    "Locked for " + LOCK_DURATION.toMinutes() + " minutes after "
+                            + attempts + " failed attempts");
         }
         userRepository.save(user);
     }

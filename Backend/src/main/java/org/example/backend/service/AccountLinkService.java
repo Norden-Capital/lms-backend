@@ -3,6 +3,7 @@ package org.example.backend.service;
 import org.example.backend.dto.LinkInfoResponse;
 import org.example.backend.dto.MessageResponse;
 import org.example.backend.dto.SetPasswordWithTokenRequest;
+import org.example.backend.entity.ActionType;
 import org.example.backend.entity.AuthToken;
 import org.example.backend.entity.User;
 import org.example.backend.entity.UserStatus;
@@ -75,6 +76,7 @@ public class AccountLinkService {
     private final MailService mailService;
     private final AccessService accessService;
     private final AccountGuard accountGuard;
+    private final ActionLogService actionLog;
     private final String frontendUrl;
 
     public AccountLinkService(AuthTokenRepository tokenRepository,
@@ -83,6 +85,7 @@ public class AccountLinkService {
                               MailService mailService,
                               AccessService accessService,
                               AccountGuard accountGuard,
+                              ActionLogService actionLog,
                               @Value("${app.frontend-url}") String frontendUrl) {
         this.tokenRepository = tokenRepository;
         this.userRepository = userRepository;
@@ -90,6 +93,7 @@ public class AccountLinkService {
         this.mailService = mailService;
         this.accessService = accessService;
         this.accountGuard = accountGuard;
+        this.actionLog = actionLog;
         this.frontendUrl = frontendUrl.replaceAll("/+$", "");
     }
 
@@ -136,6 +140,7 @@ public class AccountLinkService {
 
         sendInvitation(user, actingUserId);
         log.info("User id={} resent the invitation for account id={}", actingUserId, userId);
+        actionLog.record(ActionType.INVITATION_RESENT, actingUserId, user, null);
 
         return new MessageResponse("Invitation sent again to " + user.getEmail() + ". The old link no longer works.");
     }
@@ -166,6 +171,7 @@ public class AccountLinkService {
         tokenRepository.deleteByUserIdAndType(user.getId(), AuthToken.Type.INVITE);
         accessService.invalidate(user.getId());
         log.info("User id={} accepted their invitation", user.getId());
+        actionLog.record(ActionType.INVITATION_ACCEPTED, user, null, null);
 
         return new MessageResponse("Your account is ready. Sign in to finish setting up two-factor authentication.");
     }
@@ -200,6 +206,7 @@ public class AccountLinkService {
             }
             sendReset(user);
             log.info("Password reset link requested for account id={}", user.getId());
+            actionLog.record(ActionType.PASSWORD_RESET_REQUESTED, (User) null, user, null);
         });
 
         return new MessageResponse(FORGOT_ANSWER);
@@ -229,6 +236,7 @@ public class AccountLinkService {
 
         sendReset(user);
         log.info("User id={} sent a password reset link to account id={}", actingUserId, userId);
+        actionLog.record(ActionType.PASSWORD_RESET_SENT, actingUserId, user, null);
 
         return new MessageResponse("Reset link sent to " + user.getEmail() + ". It works for "
                 + RESET_TTL.toMinutes() + " minutes.");
@@ -263,6 +271,7 @@ public class AccountLinkService {
         tokenRepository.deleteByUserIdAndType(user.getId(), AuthToken.Type.PASSWORD_RESET);
         accessService.invalidate(user.getId());
         log.info("User id={} reset their password from an email link", user.getId());
+        actionLog.record(ActionType.PASSWORD_RESET_COMPLETED, user, null, null);
 
         return new MessageResponse("Password changed. Sign in with your new password.");
     }

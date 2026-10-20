@@ -1,5 +1,10 @@
 package org.example.backend.service;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.OptionalLong;
+import dev.samstevens.totp.exceptions.CodeGenerationException;
+import dev.samstevens.totp.exceptions.TimeProviderException;
 import dev.samstevens.totp.code.CodeGenerator;
 import dev.samstevens.totp.code.CodeVerifier;
 import dev.samstevens.totp.code.DefaultCodeGenerator;
@@ -80,6 +85,36 @@ public class TwoFactorAuthService {
         if (secret == null || code == null || code.isBlank()) return false;
         return codeVerifier.isValidCode(secret, code.trim());
     }
+
+    /**
+     * Which 30-second step a code belongs to, if it is valid at all — the same
+     * window {@link #isCodeValid} allows, one step either side.
+     *
+     * <p>The step is what makes a code single-use (decided 2026-10-19): the
+     * caller remembers the last step it accepted and refuses any code from that
+     * step or before. Without it the same six digits worked for up to ninety
+     * seconds, to anybody who saw them.
+     */
+    public OptionalLong matchingStep(String secret, String code) {
+        if (secret == null || code == null || code.isBlank()) return OptionalLong.empty();
+        String candidate = code.trim();
+        try {
+            long current = Math.floorDiv(timeProvider.getTime(), PERIOD_SECONDS);
+            for (long step = current - 1; step <= current + 1; step++) {
+                String expected = codeGenerator.generate(secret, step);
+                if (MessageDigest.isEqual(
+                        expected.getBytes(StandardCharsets.US_ASCII),
+                        candidate.getBytes(StandardCharsets.US_ASCII))) {
+                    return OptionalLong.of(step);
+                }
+            }
+        } catch (CodeGenerationException | TimeProviderException e) {
+            return OptionalLong.empty();
+        }
+        return OptionalLong.empty();
+    }
+
+    private static final long PERIOD_SECONDS = 30;
 
     /**
      * Fresh single-use codes, in plaintext. The caller must hash these before
