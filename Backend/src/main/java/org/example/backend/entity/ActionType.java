@@ -34,5 +34,11 @@ public enum ActionType {
     // ── Signing in ────────────────────────────────────────────────────────
     SIGN_IN,
     SIGN_IN_FAILED,
-    ACCOUNT_LOCKED
+    ACCOUNT_LOCKED,
+
+    // ── Backups ───────────────────────────────────────────────────────────
+    /** The Owner pressed "Back up now". The nightly run is not logged here. */
+    BACKUP_STARTED,
+    BACKUP_DOWNLOADED,
+    BACKUP_DELETED
 }

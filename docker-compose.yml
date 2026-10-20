@@ -106,6 +106,13 @@ services:
       # address for rate limits and the action log. See application.properties.
       - PROXY_SECRET=${PROXY_SECRET:-}
 
+      # Backups: the off-site copy in Cloudflare R2. Unset means the copies stay
+      # on the server only — see BackupService.
+      - R2_ENDPOINT=${R2_ENDPOINT:-}
+      - R2_BUCKET=${R2_BUCKET:-}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+
       # By service name over the internal network. Nothing is published, so this
       # address does not exist anywhere outside this compose project.
       - DOCKER_API_URL=http://docker-socket-proxy:2375
@@ -128,6 +135,12 @@ services:
       # and environments, which is where secrets live.
       - /proc/1/net/dev:/host/proc/1/net/dev:ro
 
+      # The nightly database copies. A named volume rather than a host folder,
+      # so it keeps the ownership the image gives /backups and the backend —
+      # which does not run as root — can write to it. Kept forever: removing
+      # the volume removes every server copy.
+      - backup_files:/backups
+
     # Deliberately NOT depending on docker-socket-proxy. The backend is the
     # product and the proxy is a panel on a monitoring page; coupling them means
     # a failed pull of a third-party image takes the application down. Nothing
@@ -139,3 +152,4 @@ services:
 
 volumes:
   postgres_data:
+  backup_files:

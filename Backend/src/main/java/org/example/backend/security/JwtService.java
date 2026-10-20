@@ -50,6 +50,10 @@ public class JwtService {
     public static final String TYPE_ACCESS = "access";
     public static final String TYPE_MFA_PENDING = "mfa_pending";
     public static final String TYPE_ENROLMENT_PENDING = "enrolment_pending";
+    public static final String TYPE_BACKUP_DOWNLOAD = "backup_download";
+
+    /** A download link is opened straight away; two minutes is plenty. */
+    private static final Duration BACKUP_DOWNLOAD_TTL = Duration.ofMinutes(2);
 
     private final SecretKey key;
     private final Duration accessTokenTtl;
@@ -140,6 +144,24 @@ public class JwtService {
                 .claim(CLAIM_ROLE, user.getRole().getName())
                 .issuedAt(Date.from(now))
                 .expiration(Date.from(now.plus(accessTokenTtl)))
+                .signWith(key)
+                .compact();
+    }
+
+    /**
+     * A short-lived link to one backup file.
+     *
+     * <p>The browser downloads straight from this API rather than through the
+     * website, whose server cannot pass on large files. A link grants that one
+     * file for two minutes and nothing else.
+     */
+    public String generateBackupDownloadToken(String backupPublicId) {
+        Instant now = Instant.now();
+        return Jwts.builder()
+                .subject(backupPublicId)
+                .claim(CLAIM_TYPE, TYPE_BACKUP_DOWNLOAD)
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(now.plus(BACKUP_DOWNLOAD_TTL)))
                 .signWith(key)
                 .compact();
     }

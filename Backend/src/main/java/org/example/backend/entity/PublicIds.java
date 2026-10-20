@@ -20,7 +20,12 @@ public final class PublicIds {
     }
 
     public static String generate() {
-        StringBuilder code = new StringBuilder("NC-");
+        return generate("NC");
+    }
+
+    /** The same shape with another prefix — {@code BK-…} for backups. */
+    public static String generate(String prefix) {
+        StringBuilder code = new StringBuilder(prefix).append('-');
         for (int i = 0; i < 8; i++) {
             if (i == 4) code.append('-');
             code.append(ALPHABET.charAt(RANDOM.nextInt(ALPHABET.length())));

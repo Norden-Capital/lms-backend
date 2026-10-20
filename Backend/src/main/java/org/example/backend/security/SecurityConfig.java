@@ -68,6 +68,10 @@ public class SecurityConfig {
                     // page. Invented data only — see EmailPreviewController.
                     .requestMatchers(HttpMethod.GET, "/api/email-previews").permitAll()
 
+                    // A backup file, by a two-minute signed link the Owner asked
+                    // for — the link is the proof. See BackupController.
+                    .requestMatchers(HttpMethod.GET, "/api/backups/download").permitAll()
+
                     // The only genuinely anonymous auth endpoints. Listed one by
                     // one on purpose — a blanket /api/auth/** is what previously
                     // left 2FA setup open to the world.
