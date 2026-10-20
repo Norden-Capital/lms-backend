@@ -58,6 +58,13 @@ public class BrandController {
         return brands.refresh(id, principal.userId());
     }
 
+    @PutMapping("/{id}/ga4")
+    @Operation(summary = "Set the brand's Google Analytics property — for the SEO Overview")
+    public BrandDtos.Brand setGa4(@PathVariable String id, @Valid @RequestBody BrandDtos.Ga4 request,
+                                  @AuthenticationPrincipal AuthPrincipal principal) {
+        return brands.setGa4(id, request.propertyId(), principal.userId());
+    }
+
     @PutMapping("/{id}/active")
     @Operation(summary = "Switch a brand on or off — off, it leaves the inbox but is kept")
     public BrandDtos.Brand setActive(@PathVariable String id, @RequestBody BrandDtos.Active request,

@@ -118,6 +118,23 @@ public class BrandService {
         return toDto(brand);
     }
 
+    /** Sets the brand's Google Analytics property — digits only, or empty to clear it. */
+    @Transactional
+    public BrandDtos.Brand setGa4(String id, String input, Long actorId) {
+        Brand brand = find(id);
+        String value = input == null ? "" : input.strip().replaceFirst("(?i)^properties/", "");
+        if (!value.isEmpty() && !value.matches("[0-9]{6,15}")) {
+            throw ApiException.badRequest("The Google Analytics ID is a number, like 123456789.");
+        }
+        String next = value.isEmpty() ? null : value;
+        if (!java.util.Objects.equals(brand.getGa4PropertyId(), next)) {
+            brand.setGa4PropertyId(next);
+            actionLog.record(ActionType.BRAND_UPDATED, actorId, null,
+                    describe(brand) + (next == null ? " Google Analytics removed" : " Google Analytics " + next));
+        }
+        return toDto(brand);
+    }
+
     @Transactional
     public BrandDtos.Brand setActive(String id, boolean active, Long actorId) {
         Brand brand = find(id);
@@ -152,6 +169,6 @@ public class BrandService {
 
     private static BrandDtos.Brand toDto(Brand brand, int[] replies) {
         return new BrandDtos.Brand(brand.getPublicId(), brand.getName(), brand.getEmail(), brand.getDomain(),
-                brand.getLogoUrl(), brand.isActive(), brand.getCreatedAt(), replies);
+                brand.getLogoUrl(), brand.isActive(), brand.getCreatedAt(), replies, brand.getGa4PropertyId());
     }
 }

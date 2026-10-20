@@ -118,6 +118,11 @@ services:
       - INBOX_USERNAME=${INBOX_USERNAME:-}
       - INBOX_PASSWORD=${INBOX_PASSWORD:-}
 
+      # SEO Overview: Google Analytics. The deploy writes the key into
+      # ./secrets; empty = "not connected".
+      - GA4_CREDENTIALS_FILE=${GA4_CREDENTIALS_FILE:-}
+      - SEO_TIMEZONE=${SEO_TIMEZONE:-America/Toronto}
+
       # By service name over the internal network. Nothing is published, so this
       # address does not exist anywhere outside this compose project.
       - DOCKER_API_URL=http://docker-socket-proxy:2375
@@ -145,6 +150,9 @@ services:
       # which does not run as root — can write to it. Kept forever: removing
       # the volume removes every server copy.
       - backup_files:/backups
+
+      # The Google Analytics key, written by the deploy. Read-only.
+      - ./secrets:/run/secrets:ro
 
     # Deliberately NOT depending on docker-socket-proxy. The backend is the
     # product and the proxy is a panel on a monitoring page; coupling them means

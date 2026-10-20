@@ -50,6 +50,10 @@ public class Brand {
     @Column(nullable = false)
     private boolean active;
 
+    /** Its Google Analytics 4 property, digits only — for the SEO Overview. Null until set. */
+    @Column(name = "ga4_property_id", length = 15)
+    private String ga4PropertyId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

@@ -17,9 +17,10 @@ public final class BrandDtos {
      * @param logoUrl read from the website; null when it declared none
      * @param active  switched off, it is out of the inbox but kept
      * @param replies this year's replies sent from it, one number per quarter (Q1–Q4)
+     * @param ga4PropertyId its Google Analytics property, digits only; null until set
      */
     public record Brand(String id, String name, String email, String domain, String logoUrl, boolean active,
-                        Instant createdAt, int[] replies) {
+                        Instant createdAt, int[] replies, String ga4PropertyId) {
     }
 
     /** Just the website — "ask4loan.ca" or a full address; the rest is read from it. */
@@ -27,6 +28,10 @@ public final class BrandDtos {
     }
 
     public record Active(boolean active) {
+    }
+
+    /** "123456789" or "properties/123456789"; empty clears it. */
+    public record Ga4(@Size(max = 40) String propertyId) {
     }
 
     /** Fixing what was read from the website — the name, or a brand that is not support@. */

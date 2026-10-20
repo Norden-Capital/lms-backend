@@ -159,12 +159,13 @@ jobs:
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           INBOX_USERNAME: ${{ secrets.INBOX_USERNAME }}
           INBOX_PASSWORD: ${{ secrets.INBOX_PASSWORD }}
+          GA4_CREDENTIALS: ${{ secrets.GA4_CREDENTIALS }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          envs: JWT_SECRET,ENCRYPTION_KEY,POSTGRES_PASSWORD,BOOTSTRAP_ADMIN_EMAIL,BOOTSTRAP_ADMIN_PASSWORD,BOOTSTRAP_ADMIN_FIRST_NAME,BOOTSTRAP_ADMIN_LAST_NAME,SPRING_MAIL_HOST,SPRING_MAIL_USERNAME,SPRING_MAIL_PASSWORD,PROXY_SECRET,R2_ENDPOINT,R2_BUCKET,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY,INBOX_USERNAME,INBOX_PASSWORD,GHCR_TOKEN
+          envs: JWT_SECRET,ENCRYPTION_KEY,POSTGRES_PASSWORD,BOOTSTRAP_ADMIN_EMAIL,BOOTSTRAP_ADMIN_PASSWORD,BOOTSTRAP_ADMIN_FIRST_NAME,BOOTSTRAP_ADMIN_LAST_NAME,SPRING_MAIL_HOST,SPRING_MAIL_USERNAME,SPRING_MAIL_PASSWORD,PROXY_SECRET,R2_ENDPOINT,R2_BUCKET,R2_ACCESS_KEY_ID,R2_SECRET_ACCESS_KEY,INBOX_USERNAME,INBOX_PASSWORD,GA4_CREDENTIALS,GHCR_TOKEN
           script: |
             set -e
 
@@ -176,6 +177,19 @@ jobs:
             [ -n "$JWT_SECRET" ]        || { echo "::error::JWT_SECRET is empty — add it under Settings > Secrets > Actions"; exit 1; }
             [ -n "$ENCRYPTION_KEY" ]    || { echo "::error::ENCRYPTION_KEY is empty — add it under Settings > Secrets > Actions"; exit 1; }
             [ -n "$POSTGRES_PASSWORD" ] || { echo "::error::POSTGRES_PASSWORD is empty — add it under Settings > Secrets > Actions"; exit 1; }
+
+            # The Google Analytics key (a JSON file) goes in ./secrets, which the
+            # backend sees read-only. No secret, no file: the SEO page says
+            # "not connected".
+            mkdir -p secrets
+            GA4_FILE=""
+            if [ -n "$GA4_CREDENTIALS" ]; then
+              printf '%s' "$GA4_CREDENTIALS" > secrets/ga4-key.json
+              chmod 644 secrets/ga4-key.json
+              GA4_FILE=/run/secrets/ga4-key.json
+            else
+              rm -f secrets/ga4-key.json
+            fi
 
             # docker compose reads this automatically from the working directory.
             umask 077
@@ -197,6 +211,7 @@ jobs:
             R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
             INBOX_USERNAME=${INBOX_USERNAME}
             INBOX_PASSWORD=${INBOX_PASSWORD}
+            GA4_CREDENTIALS_FILE=${GA4_FILE}
             EOF
 
             # The job token is only valid while this job runs, so log out at the
