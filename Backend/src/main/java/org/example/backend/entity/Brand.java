@@ -10,8 +10,9 @@ import lombok.Setter;
 import java.time.Instant;
 
 /**
- * A brand and the address its mail arrives at — see migration V11. Answers to
- * that mail go out from the same address.
+ * A brand and the address its mail arrives at — see migrations V12 and V13.
+ * Added by its website: the name and logo are read from it, and the address is
+ * support@{domain}. Answers to that mail go out from the same address.
  */
 @Entity
 @Table(name = "brands")
@@ -33,9 +34,21 @@ public class Brand {
     @Column(nullable = false, length = 80)
     private String name;
 
-    /** Lower case. Forwards into the inbox mailbox, and is in its "Send mail as" list. */
+    /** support@{domain}. Forwards into the inbox mailbox, and is in its "Send mail as" list. */
     @Column(nullable = false, unique = true, length = 255)
     private String email;
+
+    /** "ask4loan.ca" — what the brand was added by. */
+    @Column(nullable = false, unique = true, length = 255)
+    private String domain;
+
+    /** Read from the website; null when it declared none. */
+    @Column(name = "logo_url", length = 1000)
+    private String logoUrl;
+
+    /** Switched off: out of the inbox's brand filter and From list, but kept. */
+    @Column(nullable = false)
+    private boolean active;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;

@@ -14,8 +14,8 @@ public final class MailDtos {
     private MailDtos() {
     }
 
-    /** An address mail can go out from — the mailbox itself, or a brand. */
-    public record Sender(String name, String email) {
+    /** An address mail can go out from — the mailbox itself, or a brand (with its logo). */
+    public record Sender(String name, String email, String logoUrl) {
     }
 
     /**

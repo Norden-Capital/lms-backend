@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.example.backend.dto.MailDtos;
+import org.example.backend.service.BrandService;
 import org.example.backend.service.GmailClient;
 import org.example.backend.service.InboxService;
 import org.springframework.http.ContentDisposition;
@@ -33,10 +34,12 @@ public class InboxController {
 
     private final InboxService inbox;
     private final GmailClient gmail;
+    private final BrandService brands;
 
-    public InboxController(InboxService inbox, GmailClient gmail) {
+    public InboxController(InboxService inbox, GmailClient gmail, BrandService brands) {
         this.inbox = inbox;
         this.gmail = gmail;
+        this.brands = brands;
     }
 
     @GetMapping
@@ -154,6 +157,8 @@ public class InboxController {
         MailDtos.Sender sender = inbox.sender(from);
         gmail.send(inbox.mailbox(), new GmailClient.Outgoing(sender.name(), sender.email(), to, cc, bcc, subject,
                 body, mode, original, files), draft);
+        // Counted only once Gmail has taken it — a failed send throws above.
+        if (!draft && (mode.equals("reply") || mode.equals("replyAll"))) brands.countReply(sender.email());
         return ResponseEntity.noContent().build();
     }
 }

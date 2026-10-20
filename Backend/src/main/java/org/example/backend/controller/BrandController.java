@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-/** Brands, on the Configuration page — the Owner only. */
+/** Brands, on Configuration → Brands — the Owner only. */
 @RestController
 @RequestMapping("/api/brands")
 @Tag(name = "Brands", description = "Brand addresses for the inbox — the Owner only")
@@ -36,18 +36,33 @@ public class BrandController {
     }
 
     @PostMapping
-    @Operation(summary = "Add a brand",
-               description = "Its address must forward into the inbox mailbox and be in its Gmail \"Send mail as\" list.")
-    public ResponseEntity<BrandDtos.Brand> create(@Valid @RequestBody BrandDtos.Save request,
-                                                  @AuthenticationPrincipal AuthPrincipal principal) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(brands.create(request, principal.userId()));
+    @Operation(summary = "Add a brand by its website",
+               description = """
+                       The name and logo are read from the site; the address is support@{domain}, which
+                       must forward into the inbox mailbox and be in its Gmail "Send mail as" list.""")
+    public ResponseEntity<BrandDtos.Brand> add(@Valid @RequestBody BrandDtos.Add request,
+                                               @AuthenticationPrincipal AuthPrincipal principal) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(brands.add(request.website(), principal.userId()));
     }
 
     @PutMapping("/{id}")
     @Operation(summary = "Change a brand's name or address")
-    public BrandDtos.Brand update(@PathVariable String id, @Valid @RequestBody BrandDtos.Save request,
+    public BrandDtos.Brand update(@PathVariable String id, @Valid @RequestBody BrandDtos.Update request,
                                   @AuthenticationPrincipal AuthPrincipal principal) {
         return brands.update(id, request, principal.userId());
+    }
+
+    @PostMapping("/{id}/refresh")
+    @Operation(summary = "Read the name and logo from the website again")
+    public BrandDtos.Brand refresh(@PathVariable String id, @AuthenticationPrincipal AuthPrincipal principal) {
+        return brands.refresh(id, principal.userId());
+    }
+
+    @PutMapping("/{id}/active")
+    @Operation(summary = "Switch a brand on or off — off, it leaves the inbox but is kept")
+    public BrandDtos.Brand setActive(@PathVariable String id, @RequestBody BrandDtos.Active request,
+                                     @AuthenticationPrincipal AuthPrincipal principal) {
+        return brands.setActive(id, request.active(), principal.userId());
     }
 
     @DeleteMapping("/{id}")

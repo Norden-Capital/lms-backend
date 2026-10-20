@@ -12,5 +12,10 @@ public interface BrandRepository extends JpaRepository<Brand, Long> {
 
     Optional<Brand> findByEmailIgnoreCase(String email);
 
+    Optional<Brand> findByDomain(String domain);
+
     List<Brand> findAllByOrderByNameAscEmailAsc();
+
+    /** The brands the inbox uses — switched-off ones are left out. */
+    List<Brand> findAllByActiveTrueOrderByNameAscEmailAsc();
 }

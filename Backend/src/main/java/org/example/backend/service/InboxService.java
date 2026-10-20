@@ -45,8 +45,9 @@ public class InboxService {
     }
 
     private List<MailDtos.Sender> brandSenders() {
-        return brands.findAllByOrderByNameAscEmailAsc().stream()
-                .map((Brand b) -> new MailDtos.Sender(b.getName(), b.getEmail())).toList();
+        // Switched-off brands are out of the filter and the From list.
+        return brands.findAllByActiveTrueOrderByNameAscEmailAsc().stream()
+                .map((Brand b) -> new MailDtos.Sender(b.getName(), b.getEmail(), b.getLogoUrl())).toList();
     }
 
     /** The brand addresses, for tagging and filtering mail. */
@@ -57,7 +58,7 @@ public class InboxService {
     /** Every address mail can go out from: the mailbox itself, then each brand. */
     private List<MailDtos.Sender> senders() {
         List<MailDtos.Sender> all = new ArrayList<>();
-        all.add(new MailDtos.Sender(settings.label(), settings.email()));
+        all.add(new MailDtos.Sender(settings.label(), settings.email(), null));
         brandSenders().stream().filter(s -> !s.email().equals(settings.email())).forEach(all::add);
         return all;
     }
