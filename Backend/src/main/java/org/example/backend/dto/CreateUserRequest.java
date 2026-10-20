@@ -16,19 +16,19 @@ import jakarta.validation.constraints.Size;
 public record CreateUserRequest(
 
         @NotBlank(message = "First name is required")
-        @Size(max = 100, message = "First name must be at most 100 characters")
+        @Size(max = 100, message = "First name can be up to 100 letters")
         String firstName,
 
         @NotBlank(message = "Last name is required")
-        @Size(max = 100, message = "Last name must be at most 100 characters")
+        @Size(max = 100, message = "Last name can be up to 100 letters")
         String lastName,
 
         @NotBlank(message = "Email is required")
-        @Email(message = "Must be a valid email address")
-        @Size(max = 255, message = "Email must be at most 255 characters")
+        @Email(message = "Enter a valid email address")
+        @Size(max = 255, message = "Email can be up to 255 letters")
         String email,
 
-        @Pattern(regexp = "^$|^\\+?[0-9 ()-]{6,20}$", message = "Phone number format is not valid")
+        @Pattern(regexp = "^$|^\\+?[0-9 ()-]{6,20}$", message = "Phone number is not valid")
         String phone,
 
         /**

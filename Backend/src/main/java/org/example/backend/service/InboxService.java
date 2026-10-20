@@ -38,8 +38,7 @@ public class InboxService {
     public GmailClient.Credentials mailbox() {
         if (!settings.connected()) {
             throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
-                    "The inbox is not set up yet. The Gmail address and App Password go in the server settings "
-                            + "(INBOX_USERNAME and INBOX_PASSWORD).");
+                    "The inbox is not set up yet. Add the Gmail login to the server settings.");
         }
         return settings;
     }
@@ -93,7 +92,7 @@ public class InboxService {
         try {
             parts = jwt.parseAs(token, JwtService.TYPE_MAIL_ATTACHMENT).getSubject().split("\\|");
         } catch (JwtException | IllegalArgumentException e) {
-            throw ApiException.unauthorized("This download link has expired. Go back and click the file again.");
+            throw ApiException.unauthorized("This link expired. Click the file again.");
         }
         if (parts.length != 2) throw ApiException.unauthorized("This download link is not valid.");
         return gmail.attachment(mailbox(), parts[0], Integer.parseInt(parts[1]));

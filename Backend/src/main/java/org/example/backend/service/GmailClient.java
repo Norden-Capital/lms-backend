@@ -188,25 +188,24 @@ public class GmailClient {
                     if (attempt >= 2 || !(e.getNextException() instanceof IOException)) throw unreachable(e);
                     forget(account.id());
                 } catch (IOException e) {
-                    throw new ApiException(HttpStatus.BAD_GATEWAY, "Could not read the message from Gmail: " + e.getMessage());
+                    throw new ApiException(HttpStatus.BAD_GATEWAY, "Could not open this email from Gmail: " + e.getMessage());
                 }
             }
         }
     }
 
     private static ApiException refusedSignIn() {
-        return ApiException.badRequest("Gmail refused the sign-in. Check the email address and the App Password, "
-                + "and that 2-Step Verification is on for that Google account.");
+        return ApiException.badRequest("Gmail would not let us sign in. Check the email and App Password.");
     }
 
     private static ApiException unreachable(MessagingException e) {
         log.warn("Gmail call failed: {}", e.toString());
-        return new ApiException(HttpStatus.BAD_GATEWAY, "Could not reach Gmail. Please try again in a moment.");
+        return new ApiException(HttpStatus.BAD_GATEWAY, "Could not reach Gmail. Try again soon.");
     }
 
     private static FolderDef def(String folderId) {
         return FOLDERS.stream().filter(f -> f.id().equals(folderId)).findFirst()
-                .orElseThrow(() -> ApiException.notFound("No such folder."));
+                .orElseThrow(() -> ApiException.notFound("Folder not found."));
     }
 
     private static IMAPFolder folder(Connection connection, String folderId) throws MessagingException {
@@ -245,7 +244,7 @@ public class GmailClient {
                 Message[] matched;
                 int total;
                 int pageSize = Math.max(1, Math.min(size, 50));
-                SearchTerm term = searchTerm(query, unreadOnly, brand);
+                SearchTerm term = searchTerm(query, unreadOnly, brand, account.email());
 
                 if (term == null) {
                     total = folder.getMessageCount();
@@ -275,11 +274,14 @@ public class GmailClient {
      * Gmail search words, narrowed to one brand: mail sent to its address — or,
      * in Sent, from it. Forwarded mail keeps the brand address in its To line.
      */
-    private static SearchTerm searchTerm(String query, boolean unreadOnly, String brand) {
+    private static SearchTerm searchTerm(String query, boolean unreadOnly, String brand, String mailbox) {
         String raw = query == null ? "" : query.strip();
         if (brand != null && !brand.isBlank()) {
             String address = brand.strip();
-            raw = ("{to:" + address + " cc:" + address + " deliveredto:" + address + " from:" + address + "} " + raw).strip();
+            // Everything forwarded is "delivered to" the mailbox itself, so for its
+            // own address only the To, Cc and From lines say it was meant for it.
+            String delivered = address.equalsIgnoreCase(mailbox) ? "" : " deliveredto:" + address;
+            raw = ("{to:" + address + " cc:" + address + delivered + " from:" + address + "} " + raw).strip();
         }
         SearchTerm words = raw.isEmpty() ? null : new GmailRawSearchTerm(raw);
         SearchTerm unread = unreadOnly ? new FlagTerm(new Flags(Flags.Flag.SEEN), false) : null;
@@ -360,12 +362,12 @@ public class GmailClient {
         } catch (NumberFormatException ignored) {
             // Falls through.
         }
-        throw ApiException.notFound("No such message.");
+        throw ApiException.notFound("Email not found.");
     }
 
     private static Message find(IMAPFolder folder, long uid) throws MessagingException {
         Message message = folder.getMessageByUID(uid);
-        if (message == null) throw ApiException.notFound("This message is no longer in this folder.");
+        if (message == null) throw ApiException.notFound("This email is not in this folder anymore.");
         return message;
     }
 
@@ -449,19 +451,19 @@ public class GmailClient {
                     case "unstar" -> message.setFlag(Flags.Flag.FLAGGED, false);
                     case "archive" -> {
                         // In Gmail, archiving is leaving the Inbox; All Mail keeps it.
-                        if (!ref.folderId().equals("inbox")) throw ApiException.badRequest("Only messages in the Inbox can be archived.");
+                        if (!ref.folderId().equals("inbox")) throw ApiException.badRequest("You can only archive emails in the Inbox.");
                         folder.moveMessages(one, folder(connection, "archive"));
                     }
                     case "inbox" -> {
                         switch (ref.folderId()) {
-                            case "inbox" -> throw ApiException.badRequest("This message is already in the Inbox.");
+                            case "inbox" -> throw ApiException.badRequest("This email is already in the Inbox.");
                             // Moving out of All Mail would delete it; copying adds the Inbox back.
                             case "archive" -> folder.copyMessages(one, folder(connection, "inbox"));
                             default -> folder.moveMessages(one, folder(connection, "inbox"));
                         }
                     }
                     case "junk" -> {
-                        if (ref.folderId().equals("junk")) throw ApiException.badRequest("This message is already in Junk.");
+                        if (ref.folderId().equals("junk")) throw ApiException.badRequest("This email is already in Junk.");
                         folder.moveMessages(one, folder(connection, "junk"));
                     }
                     case "delete" -> {
@@ -556,7 +558,7 @@ public class GmailClient {
         } catch (AuthenticationFailedException e) {
             throw refusedSignIn();
         } catch (SendFailedException e) {
-            throw ApiException.badRequest("Gmail would not send to some of the addresses: " + e.getMessage());
+            throw ApiException.badRequest("Gmail could not send to some addresses: " + e.getMessage());
         } catch (MessagingException e) {
             throw unreachable(e);
         } catch (IOException e) {
@@ -621,7 +623,7 @@ public class GmailClient {
             for (InternetAddress address : addresses) address.validate();
             return addresses;
         } catch (AddressException e) {
-            throw ApiException.badRequest("The " + field + " field has an address that is not valid: " + e.getRef());
+            throw ApiException.badRequest("The " + field + " box has a wrong address: " + e.getRef());
         }
     }
 
@@ -672,7 +674,7 @@ public class GmailClient {
     private static Part attachmentPart(Part root, int wanted) throws MessagingException, IOException {
         int[] seen = {0};
         Part found = findAttachment(root, wanted, seen);
-        if (found == null) throw ApiException.notFound("No such attachment.");
+        if (found == null) throw ApiException.notFound("File not found.");
         return found;
     }
 

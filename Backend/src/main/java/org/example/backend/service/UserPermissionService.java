@@ -99,7 +99,7 @@ public class UserPermissionService {
 
         if (Roles.grantsEverything(user.getRole().getName())) {
             throw ApiException.badRequest(
-                    "Administrators and the Owner hold every permission and cannot be given exceptions.");
+                    "Administrators and the Owner already have every permission.");
         }
 
         Map<String, Permission> catalogue = permissionsByAuthority();
@@ -192,7 +192,7 @@ public class UserPermissionService {
 
         if (!unknown.isEmpty()) {
             throw ApiException.badRequest(
-                    "No such permission in " + field + ": " + String.join(", ", unknown) + ".");
+                    "Unknown permission in " + field + ": " + String.join(", ", unknown) + ".");
         }
 
         return resolved;
@@ -212,8 +212,7 @@ public class UserPermissionService {
 
         if (!refused.isEmpty()) {
             throw ApiException.forbidden(
-                    "These can only come from being an administrator and cannot be granted to one "
-                            + "person: " + String.join(", ", refused) + ".");
+                    "Only administrators can have these: " + String.join(", ", refused) + ".");
         }
     }
 
@@ -246,7 +245,7 @@ public class UserPermissionService {
 
         if (!orphans.isEmpty()) {
             throw ApiException.badRequest(
-                    "These need read on the same module, which this account would not have: "
+                    "These also need READ on the same module: "
                             + String.join(", ", orphans) + ".");
         }
     }

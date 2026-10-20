@@ -146,7 +146,7 @@ public class SecurityConfig {
                 response,
                 HttpServletResponse.SC_UNAUTHORIZED,
                 "Unauthorized",
-                "Authentication is required to access this resource.",
+                "Please sign in first.",
                 request.getRequestURI());
     }
 
@@ -157,7 +157,7 @@ public class SecurityConfig {
                 response,
                 HttpServletResponse.SC_FORBIDDEN,
                 "Forbidden",
-                "You do not have permission to perform this action.",
+                "You do not have permission to do that.",
                 request.getRequestURI());
     }
 

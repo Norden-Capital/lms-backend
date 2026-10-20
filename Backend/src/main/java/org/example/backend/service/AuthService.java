@@ -43,7 +43,7 @@ public class AuthService {
     private static final Duration LOCK_DURATION = Duration.ofMinutes(15);
 
     /** Identical for unknown emails and wrong passwords, so the API can't be used to discover who has an account. */
-    private static final String GENERIC_LOGIN_FAILURE = "Invalid email or password.";
+    private static final String GENERIC_LOGIN_FAILURE = "Wrong email or password.";
 
 
     private final UserRepository userRepository;
@@ -159,11 +159,11 @@ public class AuthService {
         try {
             claims = jwtService.parseAs(request.mfaToken(), JwtService.TYPE_MFA_PENDING);
         } catch (JwtException | IllegalArgumentException e) {
-            throw ApiException.unauthorized("This login session has expired. Please sign in again.");
+            throw ApiException.unauthorized("Your sign-in timed out. Please sign in again.");
         }
 
         User user = userRepository.findById(claims.get(JwtService.CLAIM_USER_ID, Number.class).longValue())
-                .orElseThrow(() -> ApiException.unauthorized("This login session is no longer valid."));
+                .orElseThrow(() -> ApiException.unauthorized("Please sign in again."));
 
         if (user.isLocked()) {
             actionLog.record(ActionType.SIGN_IN_FAILED, (User) null, user, "Tried while locked");
@@ -174,14 +174,14 @@ public class AuthService {
         if (request.hasRecoveryCode()) {
             if (!redeemRecoveryCode(user, request.recoveryCode())) {
                 registerFailedAttempt(user, "Wrong recovery code");
-                throw ApiException.unauthorized("That code is not valid.");
+                throw ApiException.unauthorized("Wrong code.");
             }
             actionLog.record(ActionType.RECOVERY_CODE_USED, user, null, null);
             return completeLogin(user, "Recovery code");
         }
 
         if (!request.hasCode()) {
-            throw ApiException.badRequest("Provide either the 6-digit code or a recovery code.");
+            throw ApiException.badRequest("Enter the 6-digit code or a recovery code.");
         }
 
         // Counts towards the same lockout as passwords — a 6-digit code is
@@ -189,14 +189,14 @@ public class AuthService {
         OptionalLong step = twoFactorAuthService.matchingStep(decryptedSecret(user), request.code());
         if (step.isEmpty()) {
             registerFailedAttempt(user, "Wrong two-factor code");
-            throw ApiException.unauthorized("That code is not valid.");
+            throw ApiException.unauthorized("Wrong code.");
         }
         // Single use: a code from a step already accepted is refused, so a code
         // somebody saw cannot be replayed. Counted as a failure — a replay is
         // not an innocent mistake.
         if (user.getMfaLastUsedStep() != null && step.getAsLong() <= user.getMfaLastUsedStep()) {
             registerFailedAttempt(user, "Two-factor code used twice");
-            throw ApiException.unauthorized("That code has already been used. Wait for the next one in your app.");
+            throw ApiException.unauthorized("This code was already used. Wait for a new one.");
         }
         user.setMfaLastUsedStep(step.getAsLong());
 
@@ -216,7 +216,7 @@ public class AuthService {
         User user = requireUser(userId);
 
         if (user.isMfaEnabled()) {
-            throw ApiException.conflict("Two-factor authentication is already enabled. Disable it first to re-enrol.");
+            throw ApiException.conflict("Two-factor sign-in is already on.");
         }
 
         String secret = twoFactorAuthService.generateSecret();
@@ -238,11 +238,11 @@ public class AuthService {
             throw ApiException.badRequest("Start two-factor setup before confirming a code.");
         }
         if (user.isMfaEnabled()) {
-            throw ApiException.conflict("Two-factor authentication is already enabled.");
+            throw ApiException.conflict("Two-factor sign-in is already on.");
         }
         OptionalLong step = twoFactorAuthService.matchingStep(decryptedSecret(user), request.code());
         if (step.isEmpty()) {
-            throw ApiException.badRequest("That code is not valid. Check your authenticator app and try again.");
+            throw ApiException.badRequest("Wrong code. Check your app and try again.");
         }
 
         user.setMfaEnabled(true);
@@ -263,8 +263,7 @@ public class AuthService {
         Set<String> permissions = permissionService.effectivePermissionsFor(user);
 
         return MfaConfirmResponse.enrolled(
-                "Two-factor authentication is now enabled. Save these recovery codes somewhere safe — "
-                        + "they are shown once and are the only way back in if you lose your phone.",
+                "Two-factor sign-in is on. Save these codes now. You need them if you lose your phone.",
                 recoveryCodes,
                 jwtService.generateAccessToken(user, permissions),
                 jwtService.getAccessTokenTtl().toSeconds());
@@ -290,8 +289,7 @@ public class AuthService {
         log.warn("Rejected an attempt to disable 2FA for user id={}", userId);
 
         throw ApiException.forbidden(
-                "Two-factor authentication cannot be switched off. If you have lost access to your "
-                        + "device, ask an administrator to reset it for you.");
+                "You cannot turn off two-factor sign-in. Lost your phone? Ask an administrator.");
     }
 
     /**
@@ -315,7 +313,7 @@ public class AuthService {
     public MessageResponse resetMfaFor(Long targetUserId, Long actingUserId) {
         if (targetUserId.equals(actingUserId)) {
             throw ApiException.forbidden(
-                    "You cannot reset your own two-factor authentication. Ask another administrator.");
+                    "You cannot reset your own two-factor sign-in. Ask another administrator.");
         }
 
         User target = userRepository.findWithRoleById(targetUserId)
@@ -327,7 +325,7 @@ public class AuthService {
         accountGuard.requireCanManage(target, actingUserId);
 
         if (!target.isMfaEnabled() && target.getMfaSecret() == null) {
-            throw ApiException.conflict("Two-factor authentication is not set up for this account.");
+            throw ApiException.conflict("This account has no two-factor sign-in set up.");
         }
 
         target.setMfaEnabled(false);
@@ -342,7 +340,7 @@ public class AuthService {
                 target.getId(), target.getEmail(), actingUserId);
 
         return new MessageResponse(
-                target.fullName() + " can sign in with their password alone until they enrol again.");
+                target.fullName() + " can now sign in with just a password, until they set up two-factor again.");
     }
 
     /** Replaces every existing code, so a leaked list stops working immediately. */
@@ -351,17 +349,17 @@ public class AuthService {
         User user = requireUser(userId);
 
         if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) {
-            throw ApiException.unauthorized("That password is not correct.");
+            throw ApiException.unauthorized("Wrong password.");
         }
         if (!user.isMfaEnabled()) {
-            throw ApiException.conflict("Two-factor authentication is not enabled.");
+            throw ApiException.conflict("Two-factor sign-in is not on.");
         }
 
         actionLog.record(ActionType.RECOVERY_CODES_REGENERATED, user, null, null);
 
         // No token here: this caller already holds a working one.
         return MfaConfirmResponse.codesOnly(
-                "New recovery codes generated. Your previous codes no longer work.",
+                "New codes made. Your old codes no longer work.",
                 issueRecoveryCodes(user));
     }
 
@@ -430,7 +428,7 @@ public class AuthService {
 
     private String decryptedSecret(User user) {
         if (user.getMfaSecret() == null) {
-            throw ApiException.badRequest("Two-factor authentication is not set up for this account.");
+            throw ApiException.badRequest("This account has no two-factor sign-in set up.");
         }
         return encryptionService.decrypt(user.getMfaSecret());
     }

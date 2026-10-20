@@ -238,14 +238,14 @@ public class BackupService {
                 } catch (IOException e) {
                     // Kept on the server and downloadable, but the off-site copy is
                     // the whole point of R2 — so this is a failure the page shows.
-                    error = "Saved on the server, but the copy to Cloudflare R2 failed: " + e.getMessage();
+                    error = "Saved on the server, but the cloud copy failed: " + e.getMessage();
                 }
             }
         } catch (BackupFailure e) {
             error = e.getMessage();
         } catch (Exception e) {
             log.error("Backup {} failed unexpectedly", run.getPublicId(), e);
-            error = "Something unexpected went wrong: " + e.getMessage();
+            error = "Something went wrong: " + e.getMessage();
         } finally {
             try {
                 Files.deleteIfExists(part);
@@ -302,7 +302,7 @@ public class BackupService {
         ProcessBuilder builder = new ProcessBuilder(pgRestore, "--list").redirectInput(file.toFile());
         Result result = run(builder, "check the copy");
         if (result.exitCode() != 0) {
-            throw new BackupFailure("The copy was made but could not be read back: " + firstLine(result.output()));
+            throw new BackupFailure("The copy was made but cannot be read: " + firstLine(result.output()));
         }
         if (!result.output().contains(" TABLE DATA ")) {
             throw new BackupFailure("The copy was made but has no data in it.");
@@ -347,7 +347,7 @@ public class BackupService {
             restore.environment().put("PGPASSWORD", datasourcePassword);
             Result loaded = run(restore, "run the restore test");
             if (loaded.exitCode() != 0) {
-                throw new BackupFailure("Restore test failed — the copy could not be loaded: "
+                throw new BackupFailure("Test restore failed. The copy would not load: "
                         + firstLine(loaded.output()));
             }
 
@@ -356,15 +356,15 @@ public class BackupService {
             long[] live = counts(sql(db.name(), COUNT_SQL, "count the live database"));
 
             if (copy[0] != live[0]) {
-                throw new BackupFailure("Restore test failed — the copy has " + copy[0]
-                        + " tables, the live database has " + live[0] + ".");
+                throw new BackupFailure("Test restore failed. The copy has " + copy[0]
+                        + " tables, but the live database has " + live[0] + ".");
             }
             if (copyUsers == 0) {
-                throw new BackupFailure("Restore test failed — the copy has no accounts in it.");
+                throw new BackupFailure("Test restore failed. The copy has no accounts.");
             }
             if (copy[1] < live[1] * 0.95) {
-                throw new BackupFailure("Restore test failed — the copy has " + copy[1]
-                        + " rows, the live database has " + live[1] + ".");
+                throw new BackupFailure("Test restore failed. The copy has " + copy[1]
+                        + " rows, but the live database has " + live[1] + ".");
             }
             return "Restored " + copy[0] + " tables, " + copy[1] + " rows";
         } finally {
@@ -381,7 +381,7 @@ public class BackupService {
         try {
             return new long[]{Long.parseLong(parts[0]), Long.parseLong(parts[1])};
         } catch (RuntimeException e) {
-            throw new BackupFailure("Restore test failed — could not count the rows: " + tablesAndRows);
+            throw new BackupFailure("Test restore failed. Could not count the rows: " + tablesAndRows);
         }
     }
 
@@ -413,8 +413,8 @@ public class BackupService {
         try {
             process = builder.start();
         } catch (IOException e) {
-            throw new BackupFailure("Could not " + what + " — the " + builder.command().getFirst()
-                    + " program is not installed on the server.");
+            throw new BackupFailure("Could not " + what + ". " + builder.command().getFirst()
+                    + " is not installed on the server.");
         }
 
         // Read on another thread, so a chatty command never blocks on a full pipe.
@@ -430,14 +430,14 @@ public class BackupService {
         try {
             if (!process.waitFor(COMMAND_TIMEOUT.toMinutes(), TimeUnit.MINUTES)) {
                 process.destroyForcibly();
-                throw new BackupFailure("Could not " + what + " — it took longer than "
+                throw new BackupFailure("Could not " + what + ". It took over "
                         + COMMAND_TIMEOUT.toMinutes() + " minutes.");
             }
             return new Result(process.exitValue(), output.get(1, TimeUnit.MINUTES));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             process.destroyForcibly();
-            throw new BackupFailure("Could not " + what + " — the server was shutting down.");
+            throw new BackupFailure("Could not " + what + ". The server was shutting down.");
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException e) {
             return new Result(process.exitValue(), "");
         }
@@ -630,7 +630,7 @@ public class BackupService {
         try {
             publicId = jwtService.parseAs(token, JwtService.TYPE_BACKUP_DOWNLOAD).getSubject();
         } catch (JwtException | IllegalArgumentException e) {
-            throw ApiException.unauthorized("This download link has expired. Go back and press Download again.");
+            throw ApiException.unauthorized("This link expired. Press Download again.");
         }
 
         BackupRun run = find(publicId);
@@ -664,12 +664,12 @@ public class BackupService {
 
         if (run.isInCloud()) {
             if (!cloud.isConfigured()) {
-                throw ApiException.conflict("This backup has a copy in Cloudflare R2, but R2 is not set up on the server any more.");
+                throw ApiException.conflict("This backup is in the cloud, but cloud storage is not set up anymore.");
             }
             try {
                 cloud.delete(CLOUD_FOLDER + run.getFileName());
             } catch (IOException e) {
-                throw new ApiException(HttpStatus.BAD_GATEWAY, "Could not delete the copy in Cloudflare R2: " + e.getMessage());
+                throw new ApiException(HttpStatus.BAD_GATEWAY, "Could not delete the cloud copy: " + e.getMessage());
             }
         }
         if (run.getFileName() != null) {
@@ -690,7 +690,7 @@ public class BackupService {
 
     private BackupRun find(String publicId) {
         return runRepository.findByPublicId(publicId)
-                .orElseThrow(() -> ApiException.notFound("No such backup."));
+                .orElseThrow(() -> ApiException.notFound("Backup not found."));
     }
 
     /** "Backup BK-7K4F-92QX of 20 Oct 2026, 03:00 UTC (1.2 MB)", for the action log. */

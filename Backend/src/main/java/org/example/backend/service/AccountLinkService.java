@@ -61,12 +61,12 @@ public class AccountLinkService {
      * cannot be used to find out who works here.
      */
     private static final String FORGOT_ANSWER =
-            "If an account exists for this email, a reset link is on its way. Check your inbox.";
+            "If this email has an account, we sent a reset link. Check your inbox.";
 
     private static final String RESET_GONE =
-            "This reset link has expired or was already used. Ask for a new one.";
+            "This reset link expired or was already used. Ask for a new one.";
     private static final String INVITE_GONE =
-            "This invitation has expired or was already used. Ask an administrator to send a new one.";
+            "This invite expired or was already used. Ask an administrator for a new one.";
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -173,7 +173,7 @@ public class AccountLinkService {
         log.info("User id={} accepted their invitation", user.getId());
         actionLog.record(ActionType.INVITATION_ACCEPTED, user, null, null);
 
-        return new MessageResponse("Your account is ready. Sign in to finish setting up two-factor authentication.");
+        return new MessageResponse("Your account is ready. Sign in to finish setup.");
     }
 
     private AuthToken usableInvitation(String rawToken) {

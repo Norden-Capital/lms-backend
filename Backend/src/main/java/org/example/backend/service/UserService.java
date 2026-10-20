@@ -177,7 +177,7 @@ public class UserService {
         Optional<User> existing = userRepository.findByEmail(email);
         if (existing.isPresent()) {
             throw ApiException.conflict(existing.get().getStatus() == UserStatus.PENDING_VERIFICATION
-                    ? "This person was already invited. Open their account to resend the invitation."
+                    ? "This person is already invited. Open their account to resend it."
                     : "An account with this email already exists.");
         }
 
@@ -258,7 +258,7 @@ public class UserService {
     public UserResponse changeStatus(Long id, UserStatus status, Long actingUserId) {
         if (id.equals(actingUserId)) {
             throw ApiException.forbidden(
-                    "You cannot change your own account's status. Ask another administrator.");
+                    "You cannot change your own status. Ask another administrator.");
         }
 
         User user = userRepository.findWithRoleById(id)
@@ -346,7 +346,7 @@ public class UserService {
         String wanted = roleName.trim().toUpperCase();
 
         if (Roles.OWNER.equals(wanted)) {
-            throw ApiException.badRequest("There is only one Owner, and the role can't be given to anybody else.");
+            throw ApiException.badRequest("There is only one Owner. This role cannot be given to anyone else.");
         }
 
         // And promoting somebody to administrator, for the reason create() gives.

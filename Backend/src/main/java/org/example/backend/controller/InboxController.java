@@ -57,7 +57,8 @@ public class InboxController {
     @Operation(summary = "One page of a folder, newest first",
                description = """
                        `q` is Gmail's own search — anything that works in Gmail's search box works here.
-                       `brand` is a brand address: only mail sent to it (or, in Sent, from it).""")
+                       `brand` is one of our addresses (the mailbox or a brand): only mail sent to it
+                       (or, in Sent, from it).""")
     public MailDtos.Page messages(@RequestParam(defaultValue = "inbox") String folder,
                                   @RequestParam(required = false) String brand,
                                   @RequestParam(required = false) String q,

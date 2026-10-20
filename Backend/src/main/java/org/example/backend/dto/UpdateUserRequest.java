@@ -26,15 +26,15 @@ import jakarta.validation.constraints.Size;
 public record UpdateUserRequest(
 
         @NotBlank(message = "First name is required")
-        @Size(max = 100, message = "First name must be at most 100 characters")
+        @Size(max = 100, message = "First name can be up to 100 letters")
         String firstName,
 
         @NotBlank(message = "Last name is required")
-        @Size(max = 100, message = "Last name must be at most 100 characters")
+        @Size(max = 100, message = "Last name can be up to 100 letters")
         String lastName,
 
         /** Blank clears it. The column is nullable and plenty of people have none. */
-        @Pattern(regexp = "^$|^\\+?[0-9 ()-]{6,20}$", message = "Phone number format is not valid")
+        @Pattern(regexp = "^$|^\\+?[0-9 ()-]{6,20}$", message = "Phone number is not valid")
         String phone
 ) {
 }

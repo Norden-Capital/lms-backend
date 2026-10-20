@@ -138,7 +138,7 @@ public class BrandService {
 
     private Brand find(String id) {
         return brands.findByPublicId(id == null ? "" : id)
-                .orElseThrow(() -> ApiException.notFound("No such brand."));
+                .orElseThrow(() -> ApiException.notFound("Brand not found."));
     }
 
     private static String describe(Brand brand) {

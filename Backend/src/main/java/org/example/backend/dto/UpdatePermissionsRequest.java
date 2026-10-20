@@ -21,10 +21,10 @@ import java.util.List;
  */
 public record UpdatePermissionsRequest(
 
-        @NotNull(message = "granted is required — send an empty list for none")
+        @NotNull(message = "The granted list is missing")
         List<String> granted,
 
-        @NotNull(message = "denied is required — send an empty list for none")
+        @NotNull(message = "The denied list is missing")
         List<String> denied,
 
         /** Optional note stored against every row written, for the audit later. */

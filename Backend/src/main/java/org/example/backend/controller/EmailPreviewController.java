@@ -55,10 +55,10 @@ public class EmailPreviewController {
 
         return ResponseEntity.ok(List.of(
                 new EmailPreview("invitation", "Invitation",
-                        "An administrator invites somebody from Users → Invite user, or resends an invitation.",
+                        "Sent when an administrator invites someone, or resends an invite.",
                         from, invitation.subject(), invitation.html(), invitation.text()),
                 new EmailPreview("password-reset", "Password reset",
-                        "Somebody uses \"Forgot password?\" on the sign-in page, or an administrator sends a reset link.",
+                        "Sent when someone clicks \"Forgot password?\", or an administrator sends a reset link.",
                         from, reset.subject(), reset.html(), reset.text())
         ));
     }

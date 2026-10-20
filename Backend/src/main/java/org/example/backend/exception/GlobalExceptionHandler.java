@@ -45,7 +45,7 @@ public class GlobalExceptionHandler {
                 .forEach(error -> fieldErrors.putIfAbsent(error.getField(), error.getDefaultMessage()));
 
         return ResponseEntity.badRequest().body(ErrorResponse.validation(
-                "The request contains invalid fields.",
+                "Please fix the marked fields.",
                 request.getRequestURI(),
                 fieldErrors));
     }
@@ -57,7 +57,7 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ErrorResponse.of(
                 HttpStatus.BAD_REQUEST.value(),
                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
-                "The request body could not be read as JSON.",
+                "The request was not valid. Please try again.",
                 request.getRequestURI()));
     }
 

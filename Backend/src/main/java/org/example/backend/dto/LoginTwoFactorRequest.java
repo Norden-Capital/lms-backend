@@ -12,7 +12,7 @@ import jakarta.validation.constraints.NotBlank;
  */
 public record LoginTwoFactorRequest(
 
-        @NotBlank(message = "The mfaToken from the first login step is required")
+        @NotBlank(message = "Please sign in again")
         String mfaToken,
 
         String code,
