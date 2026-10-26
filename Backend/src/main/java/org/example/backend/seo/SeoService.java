@@ -108,6 +108,11 @@ public class SeoService {
         SeoPeriod period = SeoPeriod.of(range, from, to, LocalDate.now(zone));
         Brand brand = brands.findByPublicId(brandId == null ? "" : brandId)
             .orElseThrow(() -> ApiException.notFound("No such brand."));
+        // Same rule as the brand list above — added 2026-10-26. Checked before
+        // the cache too, so switching a brand off stops it at once.
+        if (!brand.isActive()) {
+            throw ApiException.notFound("This brand is switched off. Turn it on in Brands.");
+        }
         if (brand.getGa4PropertyId() == null) {
             throw ApiException.badRequest("This brand has no Google Analytics ID yet. Add it on Brands.");
         }

@@ -1,5 +1,6 @@
 package org.example.backend.controller;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -12,8 +13,11 @@ import org.springframework.web.bind.annotation.RestController;
  * loads the swagger-ui assets using relative URLs, so it has to live in the
  * asset folder. Rendering the same page here with absolute asset URLs keeps the
  * browser on /api/docs with no redirect.
+ *
+ * Only when app.docs.enabled is true — off on the live server.
  */
 @RestController
+@ConditionalOnProperty(name = "app.docs.enabled", havingValue = "true")
 public class DocsController {
 
     @GetMapping(value = "/api/docs", produces = MediaType.TEXT_HTML_VALUE)

@@ -1,16 +1,23 @@
 package org.example.backend.exception;
 
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.example.backend.dto.ErrorResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.TypeMismatchException;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -59,6 +66,49 @@ public class GlobalExceptionHandler {
                 HttpStatus.BAD_REQUEST.getReasonPhrase(),
                 "The request was not valid. Please try again.",
                 request.getRequestURI()));
+    }
+
+    /**
+     * A value of the wrong kind in the address, like {@code ?page=abc} or a
+     * status that does not exist. The caller's mistake, so 400 — not a crash.
+     */
+    @ExceptionHandler(TypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(TypeMismatchException ex,
+                                                            HttpServletRequest request) {
+        return clientError(HttpStatus.BAD_REQUEST, "A value in the request is not valid.", request);
+    }
+
+    /**
+     * Spring's own "you asked wrong" cases — added 2026-10-26. Before, the
+     * catch-all below answered them all with 500 and logged each one as a
+     * crash, so real crashes were buried among wrong addresses.
+     *
+     * <p>Spring Security answers 401 before any of these for someone signed out,
+     * so a stranger still cannot tell which addresses exist.
+     */
+    @ExceptionHandler({
+            NoResourceFoundException.class,
+            HttpRequestMethodNotSupportedException.class,
+            HttpMediaTypeNotSupportedException.class,
+            MissingServletRequestParameterException.class
+    })
+    public ResponseEntity<ErrorResponse> handleBadRequest(ServletException ex, HttpServletRequest request) {
+        return switch (ex) {
+            case NoResourceFoundException e -> clientError(HttpStatus.NOT_FOUND, "Not found.", request);
+            case HttpRequestMethodNotSupportedException e ->
+                    clientError(HttpStatus.METHOD_NOT_ALLOWED, "This action is not allowed here.", request);
+            case HttpMediaTypeNotSupportedException e ->
+                    clientError(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "The request was not valid. Please try again.", request);
+            default -> clientError(HttpStatus.BAD_REQUEST, "Something is missing in the request.", request);
+        };
+    }
+
+    private ResponseEntity<ErrorResponse> clientError(HttpStatusCode status, String message,
+                                                      HttpServletRequest request) {
+        log.debug("{} on {} {}", status.value(), request.getMethod(), request.getRequestURI());
+        HttpStatus known = HttpStatus.valueOf(status.value());
+        return ResponseEntity.status(known).body(ErrorResponse.of(
+                known.value(), known.getReasonPhrase(), message, request.getRequestURI()));
     }
 
     /**

@@ -100,9 +100,12 @@ public class ActionLogService {
                 // Left joins: a line with no actor (a failed sign-in) is still about its target.
                 var actor = root.join("actor", jakarta.persistence.criteria.JoinType.LEFT);
                 var target = root.join("target", jakarta.persistence.criteria.JoinType.LEFT);
+                // Ids are stored in capitals; nc-ab12-cd34 finds the same person,
+                // as it does on the user's own page — added 2026-10-26.
+                String id = user.strip().toUpperCase(java.util.Locale.ROOT);
                 conditions.add(builder.or(
-                        builder.equal(actor.get("publicId"), user.strip()),
-                        builder.equal(target.get("publicId"), user.strip())));
+                        builder.equal(actor.get("publicId"), id),
+                        builder.equal(target.get("publicId"), id)));
             }
             if (search != null && !search.isBlank()) {
                 String pattern = "%" + search.trim().toLowerCase() + "%";

@@ -55,6 +55,7 @@ public class AuthService {
     private final PermissionService permissionService;
     private final AccountGuard accountGuard;
     private final ActionLogService actionLog;
+    private final AccessService accessService;
 
     public AuthService(UserRepository userRepository,
                        MfaRecoveryCodeRepository recoveryCodeRepository,
@@ -64,7 +65,8 @@ public class AuthService {
                        EncryptionService encryptionService,
                        PermissionService permissionService,
                        AccountGuard accountGuard,
-                       ActionLogService actionLog) {
+                       ActionLogService actionLog,
+                       AccessService accessService) {
         this.userRepository = userRepository;
         this.recoveryCodeRepository = recoveryCodeRepository;
         this.passwordEncoder = passwordEncoder;
@@ -74,6 +76,7 @@ public class AuthService {
         this.permissionService = permissionService;
         this.accountGuard = accountGuard;
         this.actionLog = actionLog;
+        this.accessService = accessService;
     }
 
     // There is no self-registration. Accounts are created by invitation only —
@@ -332,8 +335,13 @@ public class AuthService {
         target.setMfaSecret(null);
         target.setMfaConfirmedAt(null);
         target.setMfaLastUsedStep(null);
+        // Signs them out everywhere — added 2026-10-26. If the phone was lost or
+        // stolen, a session already open on another device must not live on.
+        target.setTokensValidFrom(Instant.now());
         userRepository.save(target);
         recoveryCodeRepository.deleteByUserId(target.getId());
+        // Now, not when the cached access runs out.
+        accessService.invalidate(target.getId());
         actionLog.record(ActionType.TWO_FACTOR_RESET, actingUserId, target, null);
 
         log.warn("2FA RESET: user id={} ({}) had their second factor cleared by admin id={}",

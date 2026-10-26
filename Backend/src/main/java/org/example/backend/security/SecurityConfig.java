@@ -33,13 +33,16 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthFilter;
     private final ObjectMapper objectMapper;
     private final String allowedOrigins;
+    private final boolean docsEnabled;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthFilter,
                           ObjectMapper objectMapper,
-                          @Value("${app.cors.allowed-origins:http://localhost:3000}") String allowedOrigins) {
+                          @Value("${app.cors.allowed-origins:http://localhost:3000}") String allowedOrigins,
+                          @Value("${app.docs.enabled:false}") boolean docsEnabled) {
         this.jwtAuthFilter = jwtAuthFilter;
         this.objectMapper = objectMapper;
         this.allowedOrigins = allowedOrigins;
+        this.docsEnabled = docsEnabled;
     }
 
     @Bean
@@ -59,9 +62,12 @@ public class SecurityConfig {
                     .authenticationEntryPoint(authenticationEntryPoint())
                     .accessDeniedHandler(accessDeniedHandler()))
             .authorizeHttpRequests(auth -> auth
-                    // Public documentation and health.
-                    .requestMatchers("/", "/health", "/api/docs", "/error").permitAll()
-                    .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**").permitAll()
+                    // Public documentation (only when switched on) and health.
+                    // Off, those addresses answer "sign in first" like any other.
+                    .requestMatchers("/", "/health", "/error").permitAll()
+                    .requestMatchers(docsEnabled
+                            ? new String[] {"/api/docs", "/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**"}
+                            : new String[] {}).permitAll()
                     .requestMatchers("/actuator/health", "/actuator/health/**", "/actuator/info").permitAll()
 
                     // Sample renders of the emails, for the frontend's /preview

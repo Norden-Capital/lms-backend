@@ -670,7 +670,7 @@ public class GmailClient {
             if (full) {
                 int index = body.attachments.size();
                 body.attachments.add(new MailDtos.Attachment(index, fileName(part, index), baseType(part),
-                        Math.max(0, part.getSize())));
+                        fileSize(part)));
             }
             return;
         }
@@ -681,6 +681,19 @@ public class GmailClient {
             if (!full && (body.text != null || part.getSize() > PREVIEW_MAX_PART)) return;
             body.html = String.valueOf(part.getContent());
         }
+    }
+
+    /**
+     * The file's real size — added 2026-10-26. IMAP gives the size as sent,
+     * and most files travel as base64: 4 letters for every 3 bytes, plus a line
+     * break every 76 letters, so the listing showed them about 37% too big.
+     * Worked out from that rule rather than by downloading the file.
+     */
+    private static long fileSize(Part part) throws MessagingException {
+        long sent = Math.max(0, part.getSize());
+        String[] encoding = part.getHeader("Content-Transfer-Encoding");
+        boolean base64 = encoding != null && encoding.length > 0 && "base64".equalsIgnoreCase(encoding[0].trim());
+        return base64 ? Math.round(sent * 3.0 / 4 * 76 / 78) : sent;
     }
 
     private static boolean isAttachment(Part part) throws MessagingException {

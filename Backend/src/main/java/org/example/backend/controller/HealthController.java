@@ -1,5 +1,6 @@
 package org.example.backend.controller;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.view.RedirectView;
@@ -9,10 +10,16 @@ import java.util.Map;
 @RestController
 public class HealthController {
 
-    // Redirect root / → Swagger UI (served at /api/docs, see application.properties)
+    private final boolean docsEnabled;
+
+    public HealthController(@Value("${app.docs.enabled:false}") boolean docsEnabled) {
+        this.docsEnabled = docsEnabled;
+    }
+
+    // Root / → Swagger UI when the docs are on, else the health check.
     @GetMapping("/")
     public RedirectView redirectRoot() {
-        return new RedirectView("/api/docs");
+        return new RedirectView(docsEnabled ? "/api/docs" : "/health");
     }
 
     @GetMapping("/health")
