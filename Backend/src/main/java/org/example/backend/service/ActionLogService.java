@@ -81,10 +81,28 @@ public class ActionLogService {
     /** One page, newest first, filtered by kind and by any text in the line. */
     @Transactional(readOnly = true)
     public PageResponse<ActionLogResponse> list(ActionType action, String search, int page, int size, String sort) {
+        return list(action, search, null, page, size, sort);
+    }
+
+    /**
+     * {@code user} is a person's public id (NC-…): only lines where they did
+     * something or had something done to them — their Activity on Users.
+     */
+    @Transactional(readOnly = true)
+    public PageResponse<ActionLogResponse> list(ActionType action, String search, String user,
+                                                int page, int size, String sort) {
         Specification<ActionLog> spec = (root, query, builder) -> {
             List<Predicate> conditions = new ArrayList<>();
             if (action != null) {
                 conditions.add(builder.equal(root.get("action"), action));
+            }
+            if (user != null && !user.isBlank()) {
+                // Left joins: a line with no actor (a failed sign-in) is still about its target.
+                var actor = root.join("actor", jakarta.persistence.criteria.JoinType.LEFT);
+                var target = root.join("target", jakarta.persistence.criteria.JoinType.LEFT);
+                conditions.add(builder.or(
+                        builder.equal(actor.get("publicId"), user.strip()),
+                        builder.equal(target.get("publicId"), user.strip())));
             }
             if (search != null && !search.isBlank()) {
                 String pattern = "%" + search.trim().toLowerCase() + "%";

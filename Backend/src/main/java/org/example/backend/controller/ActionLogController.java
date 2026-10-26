@@ -31,16 +31,18 @@ public class ActionLogController {
     @Operation(summary = "The action log, newest first",
                description = """
                        The Owner only — administrators and members are refused. `action` narrows
-                       to one kind of event; `search` matches names, emails, details and addresses.
+                       to one kind of event; `search` matches names, emails, details and addresses;
+                       `user` (a public id, NC-…) keeps only lines that person did or that were done to them.
                        `sort` is `field,direction` — at, action, actor, target, details or ip;
                        newest first when left out.""")
     public ResponseEntity<PageResponse<ActionLogResponse>> list(
             @RequestParam(required = false) ActionType action,
             @RequestParam(required = false) String search,
+            @RequestParam(required = false) String user,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "25") int size,
             @RequestParam(required = false) String sort) {
 
-        return ResponseEntity.ok(actionLogService.list(action, search, page, size, sort));
+        return ResponseEntity.ok(actionLogService.list(action, search, user, page, size, sort));
     }
 }
