@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import org.example.backend.dto.ActionLogResponse;
 import org.example.backend.dto.PageResponse;
+import org.example.backend.dto.SignInDay;
 import org.example.backend.entity.ActionType;
 import org.example.backend.service.ActionLogService;
 import org.springframework.http.ResponseEntity;
@@ -13,6 +14,8 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/action-log")
@@ -44,5 +47,13 @@ public class ActionLogController {
             @RequestParam(required = false) String sort) {
 
         return ResponseEntity.ok(actionLogService.list(action, search, user, page, size, sort));
+    }
+
+    @GetMapping("/sign-ins")
+    @PreAuthorize("hasRole('OWNER')")
+    @Operation(summary = "One person's sign-ins per day",
+               description = "The Owner only. `user` is a public id (NC-…). Only days with a sign-in or a failed try.")
+    public List<SignInDay> signIns(@RequestParam String user) {
+        return actionLogService.signIns(user);
     }
 }

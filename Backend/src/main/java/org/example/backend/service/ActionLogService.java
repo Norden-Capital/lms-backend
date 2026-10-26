@@ -4,6 +4,7 @@ import jakarta.persistence.criteria.Predicate;
 import jakarta.servlet.http.HttpServletRequest;
 import org.example.backend.dto.ActionLogResponse;
 import org.example.backend.dto.PageResponse;
+import org.example.backend.dto.SignInDay;
 import org.example.backend.entity.ActionLog;
 import org.example.backend.entity.ActionType;
 import org.example.backend.entity.User;
@@ -11,6 +12,7 @@ import org.example.backend.exception.ApiException;
 import org.example.backend.repository.ActionLogRepository;
 import org.example.backend.repository.UserRepository;
 import org.example.backend.security.ClientIp;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
@@ -49,13 +51,31 @@ public class ActionLogService {
     private final ActionLogRepository logRepository;
     private final UserRepository userRepository;
     private final ClientIp clientIp;
+    /** The business calendar — the same one the SEO page counts its days in. */
+    private final String zone;
 
     public ActionLogService(ActionLogRepository logRepository,
                             UserRepository userRepository,
-                            ClientIp clientIp) {
+                            ClientIp clientIp,
+                            @Value("${app.seo.timezone:America/Toronto}") String zone) {
         this.logRepository = logRepository;
         this.userRepository = userRepository;
         this.clientIp = clientIp;
+        this.zone = zone;
+    }
+
+    /**
+     * Every day somebody signed in or had a wrong try on their account — the
+     * year chart on their user page, added 2026-10-26. All years at once: a
+     * line per day with something on it is a few hundred rows at most.
+     */
+    @Transactional(readOnly = true)
+    public List<SignInDay> signIns(String publicId) {
+        Long userId = userRepository.findIdByPublicId(publicId == null ? "" : publicId.strip().toUpperCase(java.util.Locale.ROOT))
+                .orElseThrow(() -> ApiException.notFound("User not found."));
+        return logRepository.signInDays(userId, zone).stream()
+                .map(row -> new SignInDay((String) row[0], ((Number) row[1]).longValue(), ((Number) row[2]).longValue()))
+                .toList();
     }
 
     /** Somebody signed in did something. */

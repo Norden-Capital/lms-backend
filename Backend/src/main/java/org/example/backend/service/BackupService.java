@@ -36,6 +36,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
@@ -46,7 +47,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * Copies of the database — decided 2026-10-20.
  *
- * <p>Every night at 03:00 UTC, and whenever the Owner presses "Back up now":
+ * <p>Every night at 03:00 Toronto time, and whenever the Owner presses "Back up now":
  *
  * <ol>
  *   <li><b>Copy</b> — {@code pg_dump} writes the whole database to one file.</li>
@@ -69,10 +70,16 @@ public class BackupService {
 
     private static final Logger log = LoggerFactory.getLogger(BackupService.class);
 
-    /** The nightly run. Change both together. */
+    /**
+     * The nightly run, on Toronto's clock — decided 2026-10-26, was 03:00 UTC
+     * (11 PM in Toronto). The zone follows summer and winter time by itself.
+     * Days on the year chart are Toronto days too. Change all four together.
+     */
+    private static final String ZONE_NAME = "America/Toronto";
+    private static final ZoneId ZONE = ZoneId.of(ZONE_NAME);
     private static final String CRON = "0 0 3 * * *";
-    private static final int RUN_HOUR_UTC = 3;
-    private static final String SCHEDULE = "Every day at 03:00 UTC";
+    private static final int RUN_HOUR = 3;
+    private static final String SCHEDULE = "Every day at 03:00 Toronto time";
 
     /** A night counts as missed an hour after the run was due. */
     private static final Duration MISSED_AFTER = Duration.ofHours(1);
@@ -84,7 +91,7 @@ public class BackupService {
     private static final DateTimeFormatter FILE_STAMP =
             DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmmss").withZone(ZoneOffset.UTC);
     private static final DateTimeFormatter LABEL_STAMP =
-            DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm 'UTC'", Locale.ENGLISH).withZone(ZoneOffset.UTC);
+            DateTimeFormatter.ofPattern("d MMM yyyy, HH:mm 'Toronto time'", Locale.ENGLISH).withZone(ZONE);
 
     private static final List<Integer> PAGE_SIZES = List.of(10, 25, 50);
 
@@ -153,7 +160,7 @@ public class BackupService {
         if (closed != null && closed > 0) log.warn("Closed {} backup(s) left running by a restart", closed);
     }
 
-    @Scheduled(cron = CRON, zone = "UTC")
+    @Scheduled(cron = CRON, zone = ZONE_NAME)
     public void nightly() {
         if (!busy.compareAndSet(false, true)) {
             log.warn("Nightly backup skipped — another backup is still running");
@@ -505,7 +512,7 @@ public class BackupService {
     }
 
     private static Instant nextRun(Instant now) {
-        Instant today = LocalDate.ofInstant(now, ZoneOffset.UTC).atTime(RUN_HOUR_UTC, 0).toInstant(ZoneOffset.UTC);
+        Instant today = LocalDate.ofInstant(now, ZONE).atTime(RUN_HOUR, 0).atZone(ZONE).toInstant();
         return today.isAfter(now) ? today : today.plus(Duration.ofDays(1));
     }
 
@@ -518,11 +525,11 @@ public class BackupService {
 
         Map<LocalDate, List<BackupRun>> byDay = new HashMap<>();
         for (BackupRun r : runs) {
-            byDay.computeIfAbsent(LocalDate.ofInstant(r.getStartedAt(), ZoneOffset.UTC), d -> new ArrayList<>()).add(r);
+            byDay.computeIfAbsent(LocalDate.ofInstant(r.getStartedAt(), ZONE), d -> new ArrayList<>()).add(r);
         }
 
-        LocalDate first = LocalDate.ofInstant(runs.getLast().getStartedAt(), ZoneOffset.UTC);
-        LocalDate today = LocalDate.ofInstant(now, ZoneOffset.UTC);
+        LocalDate first = LocalDate.ofInstant(runs.getLast().getStartedAt(), ZONE);
+        LocalDate today = LocalDate.ofInstant(now, ZONE);
 
         List<BackupOverviewResponse.Day> days = new ArrayList<>();
         for (LocalDate day = first.withDayOfYear(1); !day.isAfter(today); day = day.plusDays(1)) {
@@ -533,7 +540,7 @@ public class BackupService {
                 else if (that.stream().anyMatch(r -> r.getOutcome() == BackupRun.Outcome.SUCCEEDED)) outcome = "succeeded";
                 else outcome = "failed";
             } else if (!day.isBefore(first)) {
-                Instant due = day.atTime(RUN_HOUR_UTC, 0).toInstant(ZoneOffset.UTC).plus(MISSED_AFTER);
+                Instant due = day.atTime(RUN_HOUR, 0).atZone(ZONE).toInstant().plus(MISSED_AFTER);
                 if (now.isAfter(due)) outcome = "missed";
             }
             days.add(new BackupOverviewResponse.Day(day.toString(), outcome));
@@ -693,7 +700,7 @@ public class BackupService {
                 .orElseThrow(() -> ApiException.notFound("Backup not found."));
     }
 
-    /** "Backup BK-7K4F-92QX of 20 Oct 2026, 03:00 UTC (1.2 MB)", for the action log. */
+    /** "Backup BK-7K4F-92QX of 20 Oct 2026, 03:00 Toronto time (1.2 MB)", for the action log. */
     private static String describe(BackupRun run) {
         return "Backup " + run.getPublicId() + " of " + LABEL_STAMP.format(run.getStartedAt())
                 + " (" + humanBytes(run.getSizeBytes()) + ")";
