@@ -17,6 +17,7 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Issues and reads the three kinds of token this system uses.
@@ -46,6 +47,8 @@ public class JwtService {
     public static final String CLAIM_USER_ID = "uid";
     public static final String CLAIM_ROLE = "role";
     public static final String CLAIM_PERMISSIONS = "perms";
+    /** The sign-in this token belongs to — a row in user_sessions. Added 2026-10-26. */
+    public static final String CLAIM_SESSION = "sid";
 
     public static final String TYPE_ACCESS = "access";
     public static final String TYPE_MFA_PENDING = "mfa_pending";
@@ -93,11 +96,12 @@ public class JwtService {
     }
 
     /** The real token: identity plus everything needed to authorise a request. */
-    public String generateAccessToken(User user, Set<String> permissions) {
+    public String generateAccessToken(User user, Set<String> permissions, UUID sessionId) {
         Instant now = Instant.now();
         return Jwts.builder()
                 .subject(user.getEmail())
                 .claim(CLAIM_TYPE, TYPE_ACCESS)
+                .claim(CLAIM_SESSION, sessionId.toString())
                 .claim(CLAIM_USER_ID, user.getId())
                 .claim(CLAIM_ROLE, user.getRole().getName())
                 .claim(CLAIM_PERMISSIONS, List.copyOf(permissions))

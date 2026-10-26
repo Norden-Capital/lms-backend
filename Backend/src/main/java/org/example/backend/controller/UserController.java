@@ -8,6 +8,7 @@ import org.example.backend.dto.ChangeRoleRequest;
 import org.example.backend.dto.CreateUserRequest;
 import org.example.backend.dto.MessageResponse;
 import org.example.backend.dto.PageResponse;
+import org.example.backend.dto.SignInDay;
 import org.example.backend.dto.UpdateUserRequest;
 import org.example.backend.dto.UpdatePermissionsRequest;
 import org.example.backend.dto.UpdateUserStatusRequest;
@@ -16,9 +17,11 @@ import org.example.backend.dto.UserSummaryResponse;
 import org.example.backend.entity.User;
 import org.example.backend.entity.UserStatus;
 import org.example.backend.exception.ApiException;
+import org.example.backend.repository.MfaRecoveryCodeRepository;
 import org.example.backend.repository.UserRepository;
 import org.example.backend.security.AuthPrincipal;
 import org.example.backend.service.AccountLinkService;
+import org.example.backend.service.ActionLogService;
 import org.example.backend.service.AuthService;
 import org.example.backend.service.PermissionService;
 import org.example.backend.service.UserPermissionService;
@@ -38,6 +41,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+import java.util.Map;
+
 @RestController
 @RequestMapping("/api/users")
 @Tag(name = "Users", description = "Reading and managing user accounts")
@@ -50,19 +56,25 @@ public class UserController {
     private final UserService userService;
     private final UserPermissionService userPermissionService;
     private final AccountLinkService accountLinkService;
+    private final ActionLogService actionLogService;
+    private final MfaRecoveryCodeRepository recoveryCodeRepository;
 
     public UserController(UserRepository userRepository,
                           PermissionService permissionService,
                           AuthService authService,
                           UserService userService,
                           UserPermissionService userPermissionService,
-                          AccountLinkService accountLinkService) {
+                          AccountLinkService accountLinkService,
+                          ActionLogService actionLogService,
+                          MfaRecoveryCodeRepository recoveryCodeRepository) {
         this.userRepository = userRepository;
         this.permissionService = permissionService;
         this.authService = authService;
         this.userService = userService;
         this.userPermissionService = userPermissionService;
         this.accountLinkService = accountLinkService;
+        this.actionLogService = actionLogService;
+        this.recoveryCodeRepository = recoveryCodeRepository;
     }
 
     @GetMapping("/me")
@@ -73,6 +85,31 @@ public class UserController {
                 .orElseThrow(() -> ApiException.notFound("User not found."));
 
         return ResponseEntity.ok(UserResponse.from(user, permissionService.effectivePermissionsFor(user)));
+    }
+
+    /** Your own sign-in days, for the calendar on My dashboard. */
+    @GetMapping("/me/sign-ins")
+    @Transactional(readOnly = true)
+    @Operation(summary = "Your own sign-ins per day")
+    public List<SignInDay> mySignIns(@AuthenticationPrincipal AuthPrincipal principal) {
+        return actionLogService.signIns(myPublicId(principal));
+    }
+
+    /**
+     * How many of your recovery codes are left — added 2026-10-26. A count
+     * only, never the codes: those are shown once, when they are made.
+     */
+    @GetMapping("/me/recovery-codes")
+    @Transactional(readOnly = true)
+    @Operation(summary = "How many of your recovery codes are still unused")
+    public Map<String, Long> myRecoveryCodes(@AuthenticationPrincipal AuthPrincipal principal) {
+        return Map.of("left", recoveryCodeRepository.countByUserIdAndUsedAtIsNull(principal.userId()));
+    }
+
+    private String myPublicId(AuthPrincipal principal) {
+        return userRepository.findById(principal.userId())
+                .map(User::getPublicId)
+                .orElseThrow(() -> ApiException.notFound("User not found."));
     }
 
     /**

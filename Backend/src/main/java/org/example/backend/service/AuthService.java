@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Login, and the full two-factor lifecycle.
@@ -56,6 +57,7 @@ public class AuthService {
     private final AccountGuard accountGuard;
     private final ActionLogService actionLog;
     private final AccessService accessService;
+    private final SessionService sessionService;
 
     public AuthService(UserRepository userRepository,
                        MfaRecoveryCodeRepository recoveryCodeRepository,
@@ -66,7 +68,8 @@ public class AuthService {
                        PermissionService permissionService,
                        AccountGuard accountGuard,
                        ActionLogService actionLog,
-                       AccessService accessService) {
+                       AccessService accessService,
+                       SessionService sessionService) {
         this.userRepository = userRepository;
         this.recoveryCodeRepository = recoveryCodeRepository;
         this.passwordEncoder = passwordEncoder;
@@ -77,6 +80,7 @@ public class AuthService {
         this.accountGuard = accountGuard;
         this.actionLog = actionLog;
         this.accessService = accessService;
+        this.sessionService = sessionService;
     }
 
     // There is no self-registration. Accounts are created by invitation only —
@@ -268,7 +272,8 @@ public class AuthService {
         return MfaConfirmResponse.enrolled(
                 "Two-factor sign-in is on. Save these codes now. You need them if you lose your phone.",
                 recoveryCodes,
-                jwtService.generateAccessToken(user, permissions),
+                jwtService.generateAccessToken(user, permissions,
+                        sessionService.start(user.getId(), jwtService.getAccessTokenTtl())),
                 jwtService.getAccessTokenTtl().toSeconds());
     }
 
@@ -371,6 +376,30 @@ public class AuthService {
                 issueRecoveryCodes(user));
     }
 
+    /**
+     * Your own password, from Settings — added 2026-10-26. Takes the current
+     * one, like making new recovery codes. Every other session ends; this one
+     * stays, so you are not thrown out for doing the right thing.
+     */
+    @Transactional
+    public MessageResponse changePassword(Long userId, UUID keepSession, String current, String next) {
+        User user = requireUser(userId);
+        if (!passwordEncoder.matches(current, user.getPasswordHash())) {
+            throw ApiException.badRequest("Your current password is wrong.");
+        }
+        if (passwordEncoder.matches(next, user.getPasswordHash())) {
+            throw ApiException.badRequest("Choose a new password, not the one you have now.");
+        }
+
+        user.setPasswordHash(passwordEncoder.encode(next));
+        userRepository.save(user);
+        sessionService.endOthers(userId, keepSession);
+        actionLog.record(ActionType.PASSWORD_CHANGED, user, null, null);
+        log.info("Password changed from Settings by user id={}", userId);
+
+        return new MessageResponse("Password changed. You are signed out everywhere else.");
+    }
+
     // ── Internals ───────────────────────────────────────────────────────────
 
     private LoginResponse completeLogin(User user, String how) {
@@ -383,7 +412,8 @@ public class AuthService {
         Set<String> permissions = permissionService.effectivePermissionsFor(user);
 
         return LoginResponse.success(
-                jwtService.generateAccessToken(user, permissions),
+                jwtService.generateAccessToken(user, permissions,
+                        sessionService.start(user.getId(), jwtService.getAccessTokenTtl())),
                 jwtService.getAccessTokenTtl().toSeconds(),
                 UserResponse.from(user, permissions));
     }

@@ -8,6 +8,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.example.backend.entity.UserStatus;
 import org.example.backend.service.AccessService;
+import org.example.backend.service.SessionService;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -19,6 +20,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Turns a {@code Bearer} access token into an authenticated request.
@@ -55,10 +57,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final AccessService accessService;
+    private final SessionService sessionService;
 
-    public JwtAuthenticationFilter(JwtService jwtService, AccessService accessService) {
+    public JwtAuthenticationFilter(JwtService jwtService, AccessService accessService,
+                                   SessionService sessionService) {
         this.jwtService = jwtService;
         this.accessService = accessService;
+        this.sessionService = sessionService;
     }
 
     @Override
@@ -104,6 +109,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 throw new JwtException("Account is " + access.status());
             }
 
+            // The sign-in this token belongs to must still be open — ended from
+            // Settings, it stops here. Older tokens without one pass, until
+            // they expire. Added 2026-10-26.
+            String sid = claims.get(JwtService.CLAIM_SESSION, String.class);
+            UUID sessionId = sid == null ? null : UUID.fromString(sid);
+            if (sessionId != null) {
+                if (!sessionService.isLive(sessionId, userId)) {
+                    throw new JwtException("Session " + sessionId + " has ended");
+                }
+                sessionService.touch(sessionId);
+            }
+
             List<SimpleGrantedAuthority> authorities = new ArrayList<>();
 
             // The role comes from the database too, not from the token. Somebody
@@ -131,7 +148,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             AuthPrincipal principal = new AuthPrincipal(
                     userId,
                     claims.getSubject(),
-                    role
+                    role,
+                    sessionId
             );
 
             var authentication = new UsernamePasswordAuthenticationToken(principal, null, authorities);

@@ -10,6 +10,9 @@ public interface MfaRecoveryCodeRepository extends JpaRepository<MfaRecoveryCode
     /** The codes still available to this user — used ones are kept for the audit trail. */
     List<MfaRecoveryCode> findByUserIdAndUsedAtIsNull(Long userId);
 
+    /** How many one-time codes are still unused — for My dashboard. */
+    long countByUserIdAndUsedAtIsNull(Long userId);
+
     /** Called when a fresh batch is issued, so old codes stop working. */
     void deleteByUserId(Long userId);
 }

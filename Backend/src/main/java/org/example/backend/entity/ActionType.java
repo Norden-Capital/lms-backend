@@ -35,6 +35,10 @@ public enum ActionType {
     SIGN_IN,
     SIGN_IN_FAILED,
     ACCOUNT_LOCKED,
+    /** Someone ended one or more of their own sessions from Settings. */
+    SESSION_ENDED,
+    /** Someone changed their own password from Settings. */
+    PASSWORD_CHANGED,
 
     // ── Backups ───────────────────────────────────────────────────────────
     /** The Owner pressed "Back up now". The nightly run is not logged here. */
