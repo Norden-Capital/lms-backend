@@ -169,10 +169,17 @@ public class InboxController {
                                      @RequestParam(required = false) List<MultipartFile> files) {
         inbox.checkSendPass(token);
         MailDtos.Sender sender = inbox.sender(from);
-        gmail.send(inbox.mailbox(), new GmailClient.Outgoing(sender.name(), sender.email(), to, cc, bcc, subject,
-                body, mode, original, files), draft);
+        List<String> brandEmails = inbox.brandEmails();
+        String answeredBrand = gmail.send(inbox.mailbox(), new GmailClient.Outgoing(sender.name(), sender.email(), to,
+                cc, bcc, subject, body, mode, original, files), draft, brandEmails);
         // Counted only once Gmail has taken it — a failed send throws above.
-        if (!draft && (mode.equals("reply") || mode.equals("replyAll"))) brands.countReply(sender.email());
+        // For the brand it went out from, else the brand of the email it
+        // answers — so a reply sent from the mailbox still counts. 2026-10-26.
+        if (!draft && (mode.equals("reply") || mode.equals("replyAll"))) {
+            String brand = brandEmails.contains(sender.email().toLowerCase(java.util.Locale.ROOT))
+                    ? sender.email() : answeredBrand;
+            if (brand != null) brands.countReply(brand);
+        }
         return ResponseEntity.noContent().build();
     }
 }

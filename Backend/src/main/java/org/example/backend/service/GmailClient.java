@@ -24,6 +24,8 @@ import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.time.Instant;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -297,6 +299,11 @@ public class GmailClient {
                 String delivered = address.equalsIgnoreCase(mailbox) ? "" : " deliveredto:" + address;
                 any.append(" to:").append(address).append(" cc:").append(address).append(delivered)
                         .append(" from:").append(address);
+                // A brand's tagged mail ("[365loan] …"), which no address names.
+                if (!address.equalsIgnoreCase(mailbox)) {
+                    String tag = tagOf(address);
+                    if (!tag.isEmpty()) any.append(" subject:").append(tag);
+                }
             }
             // Gmail reads {a b c} as "any of". With no address at all, ask for one nobody has.
             String narrow = any.isEmpty() ? "to:nobody@invalid.invalid" : "{" + any.toString().strip() + "}";
@@ -510,12 +517,16 @@ public class GmailClient {
                            String body, String mode, String originalId, List<MultipartFile> files) {
     }
 
-    /** Sends through Gmail — or, with {@code draft}, saves it to Drafts instead. */
-    public void send(Credentials account, Outgoing mail, boolean draft) {
+    /**
+     * Sends through Gmail — or, with {@code draft}, saves it to Drafts instead.
+     * Returns the brand of the email being answered or forwarded, if any — so
+     * a reply can be counted for it whichever address it went out from.
+     */
+    public String send(Credentials account, Outgoing mail, boolean draft, List<String> brands) {
         String mode = mail.mode() == null ? "new" : mail.mode();
         Original original = mail.originalId() == null || mail.originalId().isBlank() || mode.equals("new")
                 ? null
-                : on(account, connection -> original(connection, mail.originalId(), mode.equals("forward")));
+                : on(account, connection -> original(connection, mail.originalId(), mode.equals("forward"), brands));
 
         try {
             MimeMessage message = new MimeMessage(smtpSession());
@@ -583,13 +594,15 @@ public class GmailClient {
         } catch (IOException e) {
             throw ApiException.badRequest("Could not read an attached file: " + e.getMessage());
         }
+        return original == null ? null : original.brand();
     }
 
-    private record Original(String messageId, String references, String quote, List<MimeBodyPart> attachments) {
+    private record Original(String messageId, String references, String quote, List<MimeBodyPart> attachments,
+                            String brand) {
     }
 
     /** What a reply or a forward carries from the message it answers. */
-    private Original original(Connection connection, String mailId, boolean withAttachments)
+    private Original original(Connection connection, String mailId, boolean withAttachments, List<String> brands)
             throws MessagingException, IOException {
         MailRef ref = ref(mailId);
         IMAPFolder folder = folder(connection, ref.folderId());
@@ -629,7 +642,8 @@ public class GmailClient {
                     attachments.add(copy);
                 }
             }
-            return new Original(header(message, "Message-ID"), header(message, "References"), quote, attachments);
+            return new Original(header(message, "Message-ID"), header(message, "References"), quote, attachments,
+                    brandOf(message, brands));
         } finally {
             folder.close(false);
         }
@@ -799,10 +813,45 @@ public class GmailClient {
                     if (brands.contains(email)) return email;
                 }
             }
+            return brandOfTag(message.getSubject(), brands);
         } catch (MessagingException ignored) {
             // No brand, then.
         }
         return null;
+    }
+
+    /**
+     * "[365loan] New message — Jane" and its replies ("Re: [365loan] …") belong
+     * to the brand whose website is 365loan.ca — decided 2026-10-26. A brand's
+     * website form can mail the mailbox straight from the mailbox, so no
+     * address on it names the brand; the tag at the start of the subject does.
+     */
+    private static final Pattern SUBJECT_TAG =
+            Pattern.compile("^\\s*(?:(?:re|fw|fwd|tr)\\s*:\\s*)*\\[([^\\]]+)]", Pattern.CASE_INSENSITIVE);
+
+    static String brandOfTag(String subject, List<String> brands) {
+        if (subject == null || brands == null) return null;
+        Matcher tag = SUBJECT_TAG.matcher(subject);
+        if (!tag.find()) return null;
+        String wanted = plain(tag.group(1));
+        if (wanted.isEmpty()) return null;
+        for (String brand : brands) {
+            if (wanted.equals(tagOf(brand))) return brand;
+        }
+        return null;
+    }
+
+    /** support@365loan.ca → "365loan": the first word of the brand's website. */
+    static String tagOf(String brandEmail) {
+        int at = brandEmail.indexOf('@');
+        String domain = at < 0 ? brandEmail : brandEmail.substring(at + 1);
+        int dot = domain.indexOf('.');
+        return plain(dot < 0 ? domain : domain.substring(0, dot));
+    }
+
+    /** Lower case, letters and digits only — so "365 Loan" and "365loan" match. */
+    private static String plain(String text) {
+        return text.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9]", "");
     }
 
     private static List<String> addresses(Address[] addresses) {

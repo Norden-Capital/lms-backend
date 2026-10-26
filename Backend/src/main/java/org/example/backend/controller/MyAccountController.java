@@ -7,6 +7,8 @@ import jakarta.validation.Valid;
 import org.example.backend.dto.ChangePasswordRequest;
 import org.example.backend.dto.MessageResponse;
 import org.example.backend.dto.SessionResponse;
+import org.example.backend.dto.UpdateUserRequest;
+import org.example.backend.dto.UserResponse;
 import org.example.backend.entity.ActionType;
 import org.example.backend.entity.User;
 import org.example.backend.exception.ApiException;
@@ -15,10 +17,12 @@ import org.example.backend.security.AuthPrincipal;
 import org.example.backend.service.ActionLogService;
 import org.example.backend.service.AuthService;
 import org.example.backend.service.SessionService;
+import org.example.backend.service.UserService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -29,7 +33,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Your own sessions and password, for Settings → Security — added 2026-10-26.
+ * Your own details, sessions and password, for Settings — added 2026-10-26.
  * Anyone signed in, and only ever about themselves: who you are comes from the
  * token, never from the request.
  */
@@ -43,13 +47,24 @@ public class MyAccountController {
     private final AuthService authService;
     private final UserRepository userRepository;
     private final ActionLogService actionLog;
+    private final UserService userService;
 
     public MyAccountController(SessionService sessionService, AuthService authService,
-                               UserRepository userRepository, ActionLogService actionLog) {
+                               UserRepository userRepository, ActionLogService actionLog,
+                               UserService userService) {
         this.sessionService = sessionService;
         this.authService = authService;
         this.userRepository = userRepository;
         this.actionLog = actionLog;
+        this.userService = userService;
+    }
+
+    /** Your own name and phone — added 2026-10-26. The email never changes. */
+    @PatchMapping
+    @Operation(summary = "Change your own name and phone")
+    public UserResponse updateMe(@AuthenticationPrincipal AuthPrincipal principal,
+                                 @Valid @RequestBody UpdateUserRequest request) {
+        return userService.updateMine(principal.userId(), request);
     }
 
     @GetMapping("/sessions")

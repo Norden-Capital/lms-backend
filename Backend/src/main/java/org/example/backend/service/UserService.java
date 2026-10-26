@@ -221,7 +221,28 @@ public class UserService {
                 .orElseThrow(() -> ApiException.notFound("No user with id " + id + "."));
 
         accountGuard.requireCanManage(user, actingUserId);
+        return applyDetails(user, request, actingUserId);
+    }
 
+    /**
+     * Your own name and phone, from Settings — added 2026-10-26. Anyone may fix
+     * their own details; the manage-others check does not apply to yourself.
+     */
+    @Transactional
+    public UserResponse updateMine(Long userId, UpdateUserRequest request) {
+        User user = userRepository.findWithRoleById(userId)
+                .orElseThrow(() -> ApiException.notFound("User not found."));
+        return applyDetails(user, request, userId);
+    }
+
+    private UserResponse applyDetails(User user, UpdateUserRequest request, Long actingUserId) {
+        // The Owner is the account made at setup (bootstrap.admin.*), and its
+        // details are fixed — decided 2026-10-26. Not even its own name, from
+        // any address, by anybody.
+        if (Roles.OWNER.equals(user.getRole().getName())) {
+            throw ApiException.forbidden("The Owner account was made at setup. Its details can't be changed.");
+        }
+        Long id = user.getId();
         // The email is not here on purpose: it cannot be changed (see
         // UpdateUserRequest).
         String before = user.fullName() + ", phone " + orNone(user.getPhone());
