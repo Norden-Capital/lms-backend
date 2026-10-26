@@ -28,6 +28,16 @@ public class SeoController {
         this.account = account;
     }
 
+    /** The robot's address, which each brand's GA4 must list as a Viewer. Null when not connected. */
+    public record Robot(String email) {
+    }
+
+    @GetMapping("/robot")
+    @Operation(summary = "The Google robot's email — add it as a Viewer in each brand's GA4")
+    public Robot robot() {
+        return new Robot(account.configured() ? account.clientEmail() : null);
+    }
+
     @GetMapping("/brands")
     @Operation(summary = "Active brands with a GA4 property")
     public List<SeoService.SeoBrand> brands() {
