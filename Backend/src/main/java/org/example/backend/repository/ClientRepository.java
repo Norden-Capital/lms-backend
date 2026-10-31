@@ -12,6 +12,8 @@ public interface ClientRepository extends JpaRepository<Client, Long> {
 
     Optional<Client> findByEmail(String email);
 
+    Optional<Client> findByPublicId(String publicId);
+
     /** Safe when the same person applies twice at the same moment: the second one simply adds nothing. */
     @Modifying
     @Query(value = """
