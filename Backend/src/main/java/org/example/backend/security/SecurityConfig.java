@@ -86,6 +86,12 @@ public class SecurityConfig {
                     // browser, because the website's server caps uploads at 4.5 MB.
                     .requestMatchers(HttpMethod.POST, "/api/inbox/send").permitAll()
 
+                    // The apply form's two steps, from the form's own server. Visitors
+                    // have no account: ApplyController checks the shared secret instead.
+                    .requestMatchers(HttpMethod.POST,
+                            "/api/public/applications",
+                            "/api/public/applications/*/finish").permitAll()
+
                     // The only genuinely anonymous auth endpoints. Listed one by
                     // one on purpose — a blanket /api/auth/** is what previously
                     // left 2FA setup open to the world.

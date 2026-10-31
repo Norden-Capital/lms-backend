@@ -7,6 +7,7 @@ import org.example.backend.entity.PublicIds;
 import org.example.backend.exception.ApiException;
 import org.example.backend.repository.BrandReplyRepository;
 import org.example.backend.repository.BrandRepository;
+import org.example.backend.repository.LoanApplicationRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,11 +34,14 @@ public class BrandService {
 
     private final BrandRepository brands;
     private final BrandReplyRepository replies;
+    private final LoanApplicationRepository applications;
     private final WebsiteInfo websites;
     private final ActionLogService actionLog;
 
-    public BrandService(BrandRepository brands, BrandReplyRepository replies, WebsiteInfo websites,
+    public BrandService(BrandRepository brands, BrandReplyRepository replies,
+                        LoanApplicationRepository applications, WebsiteInfo websites,
                         ActionLogService actionLog) {
+        this.applications = applications;
         this.brands = brands;
         this.replies = replies;
         this.websites = websites;
@@ -149,6 +153,9 @@ public class BrandService {
     @Transactional
     public void delete(String id, Long actorId) {
         Brand brand = find(id);
+        if (applications.existsByBrandId(brand.getId())) {
+            throw ApiException.conflict("This brand has applications, so it cannot be removed. Switch it off instead.");
+        }
         brands.delete(brand);
         actionLog.record(ActionType.BRAND_REMOVED, actorId, null, describe(brand));
     }

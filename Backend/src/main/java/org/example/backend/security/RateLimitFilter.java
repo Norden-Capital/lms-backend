@@ -41,6 +41,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Rule SIGN_IN = new Rule("sign-in", 10, Duration.ofMinutes(5));
     private static final Rule FORGOT = new Rule("forgot-password", 5, Duration.ofMinutes(15));
     private static final Rule LINKS = new Rule("email-links", 20, Duration.ofMinutes(15));
+    private static final Rule APPLY = new Rule("apply-form", 30, Duration.ofMinutes(15));
 
     /** POST paths and the allowance each one draws from. */
     private static final Map<String, Rule> RULES = Map.of(
@@ -52,6 +53,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             "/api/auth/invitation/check", LINKS,
             "/api/auth/invitation/accept", LINKS
     );
+
+    private static final String APPLY_PATH = "/api/public/applications";
 
     private static final String REFUSAL =
             "{\"status\":429,\"error\":\"Too Many Requests\",\"message\":"
@@ -70,14 +73,19 @@ public class RateLimitFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !"POST".equals(request.getMethod()) || !RULES.containsKey(request.getRequestURI());
+        return !"POST".equals(request.getMethod()) || ruleFor(request.getRequestURI()) == null;
+    }
+
+    /** The second step's address holds a token, so the apply form is matched by its start. */
+    private static Rule ruleFor(String path) {
+        return path.equals(APPLY_PATH) || path.startsWith(APPLY_PATH + "/") ? APPLY : RULES.get(path);
     }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain chain) throws ServletException, IOException {
-        Rule rule = RULES.get(request.getRequestURI());
+        Rule rule = ruleFor(request.getRequestURI());
         String address = clientIp.resolve(request);
         int limit = clientIp.proxyConfigured() ? rule.limit() : rule.limit() * 10;
 
