@@ -49,7 +49,7 @@ class ApplyFlowTest {
     @Autowired BrandRepository brands;
     @Autowired BrandService brandService;
 
-    /** Rate limits count per address, so each test is its own visitor. */
+    /** Each test is its own visitor. */
     private String address;
 
     @BeforeEach
@@ -336,9 +336,23 @@ class ApplyFlowTest {
     }
 
     @Test
-    void tooManyTriesFromOneAddressAreStopped() throws Exception {
+    void oneAddressCanApplyAsOftenAsItWants() throws Exception {
         Map<String, Object> bad = ApplyTestSupport.stepOne(HOST, "not-an-email");
-        for (int i = 0; i < 30; i++) postStepOne(bad).andExpect(status().isBadRequest());
-        postStepOne(bad).andExpect(status().isTooManyRequests());
+        for (int i = 0; i < 31; i++) postStepOne(bad).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void signInIsStillLimited() throws Exception {
+        for (int i = 0; i < 10; i++) postSignIn().andExpect(result ->
+                assertThat(result.getResponse().getStatus()).isNotEqualTo(429));
+        postSignIn().andExpect(status().isTooManyRequests());
+    }
+
+    private ResultActions postSignIn() throws Exception {
+        return mvc.perform(post("/api/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("X-Proxy-Secret", ApplyTestSupport.SECRET)
+                .header("X-Client-IP", address)
+                .content("{}"));
     }
 }
