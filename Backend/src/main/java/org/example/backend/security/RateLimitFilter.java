@@ -30,8 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * visitor arriving through the website shares the website server's address, so
  * the limits are relaxed tenfold rather than shutting everybody out together.
  *
- * <p>The apply form has no limit here: a client may apply as often as they want,
- * and its spam check stops robots.
+ * <p>The apply form has no limit here: a client may apply as often as they want.
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
