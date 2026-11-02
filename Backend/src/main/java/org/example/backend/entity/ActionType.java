@@ -49,5 +49,7 @@ public enum ActionType {
     // ── Configuration ─────────────────────────────────────────────────────
     BRAND_ADDED,
     BRAND_UPDATED,
-    BRAND_REMOVED
+    BRAND_REMOVED,
+    CHANNEL_ADDED,
+    CHANNEL_REMOVED
 }

@@ -56,6 +56,7 @@ public class ClientRecordsService {
     private final ApplicationEventRepository events;
     private final ClientRepository clients;
     private final BrandRepository brands;
+    private final ChannelService channels;
     private final EncryptionService encryption;
     private final ObjectMapper objectMapper;
     private final ZoneId zone;
@@ -64,6 +65,7 @@ public class ClientRecordsService {
                                 ApplicationEventRepository events,
                                 ClientRepository clients,
                                 BrandRepository brands,
+                                ChannelService channels,
                                 EncryptionService encryption,
                                 ObjectMapper objectMapper,
                                 @Value("${app.seo.timezone:America/Toronto}") String timezone) {
@@ -71,6 +73,7 @@ public class ClientRecordsService {
         this.events = events;
         this.clients = clients;
         this.brands = brands;
+        this.channels = channels;
         this.encryption = encryption;
         this.objectMapper = objectMapper;
         this.zone = ZoneId.of(timezone);
@@ -81,8 +84,8 @@ public class ClientRecordsService {
      * can only look at the email and the application's id.
      */
     @Transactional(readOnly = true)
-    public PageResponse<ApplicationDtos.Row> list(ApplicationStatus status, String brand, String search,
-                                                  int page, int size) {
+    public PageResponse<ApplicationDtos.Row> list(ApplicationStatus status, String brand, String channel,
+                                                  String search, int page, int size) {
         if (!LISTS.contains(status)) throw ApiException.badRequest("There is no such list.");
 
         Specification<LoanApplication> filter = (root, query, cb) -> {
@@ -90,6 +93,9 @@ public class ClientRecordsService {
             where.add(cb.equal(root.get("status"), status));
             if (brand != null && !brand.isBlank()) {
                 where.add(cb.equal(root.join("brand", JoinType.INNER).get("publicId"), brand));
+            }
+            if (channel != null && !channel.isBlank()) {
+                where.add(cb.equal(root.get("channel"), channel));
             }
             if (search != null && !search.isBlank()) {
                 String like = "%" + search.trim().toLowerCase(Locale.ROOT)
@@ -122,8 +128,18 @@ public class ClientRecordsService {
                 application.getRequestedAmount(),
                 application.getLanguage(),
                 isTest(application),
+                application.getChannel(),
                 application.getCreatedAt(),
                 application.getUpdatedAt());
+    }
+
+    /** The channels seen so far and the ones with a link, for the list's filter. */
+    @Transactional(readOnly = true)
+    public List<String> channelOptions() {
+        java.util.TreeSet<String> names = new java.util.TreeSet<>(channels.list());
+        names.add(ChannelService.SEO);
+        names.addAll(applications.channels());
+        return List.copyOf(names);
     }
 
     /** A client, with every time they applied. */
@@ -226,7 +242,8 @@ public class ClientRecordsService {
                 })
                 .sorted(Comparator.comparingInt(ApplicationDtos.BrandCount::leads).reversed())
                 .toList();
-        return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, daily, byBrand);
+        return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, daily, byBrand,
+                channels.funnel(first, from, modes, onlyBrand));
     }
 
     /** Leads, abandoned, failed. The rest are on their way or history, and are not counted. */

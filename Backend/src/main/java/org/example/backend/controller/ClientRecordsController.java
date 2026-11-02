@@ -31,10 +31,11 @@ public class ClientRecordsController {
                description = "`status` is LEAD, ABANDONED or FAILED. `search` looks at the email and the application's id.")
     public PageResponse<ApplicationDtos.Row> list(@RequestParam ApplicationStatus status,
                                                   @RequestParam(required = false) String brand,
+                                                  @RequestParam(required = false) String channel,
                                                   @RequestParam(required = false) String search,
                                                   @RequestParam(defaultValue = "0") int page,
                                                   @RequestParam(defaultValue = "25") int size) {
-        return records.list(status, brand, search, page, size);
+        return records.list(status, brand, channel, search, page, size);
     }
 
     @GetMapping("/applications/overview")
@@ -50,6 +51,12 @@ public class ClientRecordsController {
     @Operation(summary = "The brands, for the filter on the lists")
     public List<ApplicationDtos.BrandOption> brands() {
         return records.brandOptions();
+    }
+
+    @GetMapping("/applications/channels")
+    @Operation(summary = "The channels, for the filter on the lists")
+    public List<String> channels() {
+        return records.channelOptions();
     }
 
     @GetMapping("/clients/{id}")

@@ -26,12 +26,14 @@ import java.net.URI;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -69,6 +71,7 @@ public class ApplicationService {
     private final LeadScoutClient leadScout;
     private final ObjectMapper objectMapper;
     private final TransactionTemplate transaction;
+    private final ChannelService channels;
     private final long retryDelayMs;
     private final SecureRandom random = new SecureRandom();
 
@@ -80,6 +83,7 @@ public class ApplicationService {
                               LeadScoutClient leadScout,
                               ObjectMapper objectMapper,
                               PlatformTransactionManager transactionManager,
+                              ChannelService channels,
                               @Value("${app.leadscout.retry-delay-ms:1000}") long retryDelayMs) {
         this.applications = applications;
         this.clients = clients;
@@ -89,6 +93,7 @@ public class ApplicationService {
         this.leadScout = leadScout;
         this.objectMapper = objectMapper;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.channels = channels;
         this.retryDelayMs = retryDelayMs;
     }
 
@@ -121,6 +126,7 @@ public class ApplicationService {
             }
             Client before = open.getClient();
             open.setClient(client);
+            open.setChannel(ChannelService.of(form.extra()));
             open.setRequestedAmount(form.requestedAmount());
             open.setLanguage(form.language());
             open.setAnswers(encrypt(stored));
@@ -232,17 +238,25 @@ public class ApplicationService {
     }
 
     /** "apply.ask4loan.ca" is the brand on "ask4loan.ca". Switched-off brands take no applications. */
+    /** Someone opened the form. A website that is not a brand is not counted. */
+    public void recordVisit(ApplyDtos.Visit visit, LocalDate day) {
+        activeBrand(visit.host()).ifPresent(brand -> channels.recordVisit(brand.getId(), day, visit.visitorId(), visit.source()));
+    }
+
     private Brand brandOf(String host) {
+        return activeBrand(host)
+                .orElseThrow(() -> ApiException.badRequest("This website is not set up to take applications."));
+    }
+
+    /** apply.365loan.ca → the brand 365loan.ca, if it is switched on. */
+    private Optional<Brand> activeBrand(String host) {
         String name = host.trim().toLowerCase(Locale.ROOT).replaceFirst(":\\d+$", "");
         while (name.contains(".")) {
             var brand = brands.findByDomain(name);
-            if (brand.isPresent()) {
-                if (!brand.get().isActive()) break;
-                return brand.get();
-            }
+            if (brand.isPresent()) return brand.filter(Brand::isActive);
             name = name.substring(name.indexOf('.') + 1);
         }
-        throw ApiException.badRequest("This website is not set up to take applications.");
+        return Optional.empty();
     }
 
     private Client clientOf(String email) {

@@ -28,6 +28,14 @@ public final class ApplyDtos {
     private ApplyDtos() {
     }
 
+    /** Someone opened the form. {@code visitorId} is a random number their browser keeps. */
+    public record Visit(
+            @NotBlank @Size(max = 255) String host,
+            @NotNull @Pattern(regexp = "[A-Za-z0-9-]{8,64}") String visitorId,
+            @Size(max = 200) String source
+    ) {
+    }
+
     /**
      * Step 1. {@code stepToken} is there when the person came back with Previous
      * and pressed Next again: the same application is updated.

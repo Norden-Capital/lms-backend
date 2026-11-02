@@ -47,6 +47,10 @@ public class LoanApplication {
     @Column(nullable = false, length = 10)
     private String mode;
 
+    /** Where the person came from: the link's utm_source, or "seo" with none. See {@link org.example.backend.service.ChannelService}. */
+    @Column(nullable = false, length = 40)
+    private String channel;
+
     @Column(name = "requested_amount", nullable = false)
     private int requestedAmount;
 

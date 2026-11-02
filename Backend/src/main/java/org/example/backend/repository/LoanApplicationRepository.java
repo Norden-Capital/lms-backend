@@ -47,6 +47,9 @@ public interface LoanApplicationRepository
     List<Object[]> dailyCounts(@Param("from") Instant from, @Param("zone") String zone,
                                @Param("modes") Collection<String> modes);
 
+    @Query("SELECT DISTINCT a.channel FROM LoanApplication a")
+    List<String> channels();
+
     boolean existsByClient(Client client);
 
     boolean existsByBrandId(Long brandId);

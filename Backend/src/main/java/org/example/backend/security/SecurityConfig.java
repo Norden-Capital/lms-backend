@@ -86,9 +86,10 @@ public class SecurityConfig {
                     // browser, because the website's server caps uploads at 4.5 MB.
                     .requestMatchers(HttpMethod.POST, "/api/inbox/send").permitAll()
 
-                    // The apply form's two steps, from the form's own server. Visitors
+                    // The apply form's two steps and its visits, from the form's own server. Visitors
                     // have no account: ApplyController checks the shared secret instead.
                     .requestMatchers(HttpMethod.POST,
+                            "/api/public/visits",
                             "/api/public/applications",
                             "/api/public/applications/*/finish").permitAll()
 

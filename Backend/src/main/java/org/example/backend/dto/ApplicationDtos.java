@@ -13,7 +13,7 @@ public final class ApplicationDtos {
     /** One line in the Leads, Abandoned or Failed list. Null name or phone means it could not be read. */
     public record Row(String id, String clientId, String email, String name, String phone, String brand,
                       String status, String leadscoutStatus, int amount, String language, boolean test,
-                      Instant createdAt, Instant updatedAt) {
+                      String channel, Instant createdAt, Instant updatedAt) {
     }
 
     /** A client, with every time they applied, newest first. */
@@ -36,7 +36,18 @@ public final class ApplicationDtos {
     }
 
     public record Overview(int days, boolean includeTest, int leads, int abandoned, int failed,
-                           Map<String, Integer> leadscout, List<Day> daily, List<BrandCount> brands) {
+                           Map<String, Integer> leadscout, List<Day> daily, List<BrandCount> brands,
+                           Funnel funnel) {
+    }
+
+    /**
+     * People at each step, all channels together and per channel. Step 2 is
+     * "sent step 2", step 3 is "got the link". Each person counts once per step.
+     */
+    public record Funnel(int visitors, int step1, int step2, int step3, List<ChannelCount> channels) {
+    }
+
+    public record ChannelCount(String channel, int visitors, int step1, int step2, int step3) {
     }
 
     /** One day of the chart, with no gaps: a day with nothing still has its line. */
