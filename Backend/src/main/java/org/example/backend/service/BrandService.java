@@ -48,12 +48,12 @@ public class BrandService {
         this.actionLog = actionLog;
     }
 
-    /** Every brand, with this year's replies per quarter. */
+    /** Every brand, with this year's applies per quarter — changed 2026-11-04 from replies. */
     @Transactional(readOnly = true)
     public List<BrandDtos.Brand> list() {
         Map<Long, int[]> perQuarter = new HashMap<>();
         LocalDate january = LocalDate.now(ZoneOffset.UTC).withDayOfYear(1);
-        for (Object[] row : replies.countByQuarterSince(january.atStartOfDay().toInstant(ZoneOffset.UTC))) {
+        for (Object[] row : applications.countAppliesByQuarterSince(january.atStartOfDay().toInstant(ZoneOffset.UTC))) {
             int quarter = ((Number) row[1]).intValue();
             perQuarter.computeIfAbsent(((Number) row[0]).longValue(), id -> new int[4])[quarter - 1] =
                     ((Number) row[2]).intValue();
@@ -174,8 +174,8 @@ public class BrandService {
         return toDto(brand, new int[4]);
     }
 
-    private static BrandDtos.Brand toDto(Brand brand, int[] replies) {
+    private static BrandDtos.Brand toDto(Brand brand, int[] applies) {
         return new BrandDtos.Brand(brand.getPublicId(), brand.getName(), brand.getEmail(), brand.getDomain(),
-                brand.getLogoUrl(), brand.isActive(), brand.getCreatedAt(), replies, brand.getGa4PropertyId());
+                brand.getLogoUrl(), brand.isActive(), brand.getCreatedAt(), applies, brand.getGa4PropertyId());
     }
 }

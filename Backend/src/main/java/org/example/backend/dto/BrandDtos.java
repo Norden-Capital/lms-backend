@@ -16,11 +16,11 @@ public final class BrandDtos {
      * @param email   support@{domain} — where its mail arrives, and answers go out from
      * @param logoUrl read from the website; null when it declared none
      * @param active  switched off, it is out of the inbox but kept
-     * @param replies this year's replies sent from it, one number per quarter (Q1–Q4)
+     * @param applies this year's forms sent in full through it, one number per quarter (Q1–Q4)
      * @param ga4PropertyId its Google Analytics property, digits only; null until set
      */
     public record Brand(String id, String name, String email, String domain, String logoUrl, boolean active,
-                        Instant createdAt, int[] replies, String ga4PropertyId) {
+                        Instant createdAt, int[] applies, String ga4PropertyId) {
     }
 
     /** Just the website — "ask4loan.ca" or a full address; the rest is read from it. */

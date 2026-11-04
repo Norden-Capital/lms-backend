@@ -47,6 +47,17 @@ public interface LoanApplicationRepository
     List<Object[]> dailyCounts(@Param("from") Instant from, @Param("zone") String zone,
                                @Param("modes") Collection<String> modes);
 
+    /**
+     * [brand id, quarter 1–4, count] of forms sent in full from {@code from} on —
+     * step 2 finished, whatever LeadScout said. Real ones only, not tests.
+     */
+    @Query(value = """
+            SELECT a.brand_id, cast(extract(quarter from a.created_at at time zone 'UTC') as int), count(*)
+            FROM loan_applications a
+            WHERE a.created_at >= :from AND a.mode = 'live' AND a.status IN ('SENDING', 'LEAD', 'FAILED')
+            GROUP BY 1, 2""", nativeQuery = true)
+    List<Object[]> countAppliesByQuarterSince(@Param("from") Instant from);
+
     @Query("SELECT DISTINCT a.channel FROM LoanApplication a")
     List<String> channels();
 
