@@ -35,7 +35,7 @@ public final class ApplicationDtos {
     }
 
     /** A brand, for the filter on the lists. */
-    public record BrandOption(String id, String name, String domain) {
+    public record BrandOption(String id, String name, String domain, String logoUrl) {
     }
 
     public record Overview(int days, boolean includeTest, int leads, int abandoned, int failed,

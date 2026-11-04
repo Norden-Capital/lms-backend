@@ -230,7 +230,7 @@ public class ClientRecordsService {
     @Transactional(readOnly = true)
     public List<ApplicationDtos.BrandOption> brandOptions() {
         return brands.findAllByOrderByNameAscEmailAsc().stream()
-                .map(brand -> new ApplicationDtos.BrandOption(brand.getPublicId(), brand.getName(), brand.getDomain()))
+                .map(brand -> new ApplicationDtos.BrandOption(brand.getPublicId(), brand.getName(), brand.getDomain(), brand.getLogoUrl()))
                 .toList();
     }
 
