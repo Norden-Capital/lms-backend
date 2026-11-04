@@ -80,12 +80,29 @@ public class ClientRecordsService {
     }
 
     /**
-     * One page of a list, newest first. The answers are encrypted, so {@code search}
-     * can only look at the email and the application's id.
+     * The columns a list can be sorted by, and what each one sorts. The answers
+     * (name, phone, birth date, province, income, employer) are not here: they are
+     * encrypted, so the database cannot order them.
+     */
+    private static final Map<String, String> SORTABLE = Map.of(
+            "id", "publicId",
+            "email", "client.email",
+            "brand", "brand.name",
+            "channel", "channel",
+            "amount", "requestedAmount",
+            "result", "leadscoutStatus",
+            "createdAt", "createdAt");
+
+    /**
+     * One page of a list, newest first unless {@code sort} says otherwise. The
+     * answers are encrypted, so {@code search} can only look at the email and the
+     * application's id.
+     *
+     * @param sort {@code field,direction}, a field from {@link #SORTABLE}
      */
     @Transactional(readOnly = true)
     public PageResponse<ApplicationDtos.Row> list(ApplicationStatus status, String brand, String channel,
-                                                  String search, int page, int size) {
+                                                  String search, int page, int size, String sort) {
         if (!LISTS.contains(status)) throw ApiException.badRequest("There is no such list.");
 
         Specification<LoanApplication> filter = (root, query, cb) -> {
@@ -107,10 +124,30 @@ public class ClientRecordsService {
             return cb.and(where.toArray(Predicate[]::new));
         };
 
-        PageRequest request = PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, MAX_PAGE_SIZE),
-                Sort.by(Sort.Direction.DESC, "createdAt", "id"));
+        PageRequest request = PageRequest.of(Math.max(page, 0), Math.clamp(size, 1, MAX_PAGE_SIZE), sortOf(sort));
         Page<LoanApplication> found = applications.findAll(filter, request);
         return PageResponse.from(found.map(this::row));
+    }
+
+    /** {@code field,direction} into a {@link Sort}; the newest first breaks ties, so pages never shuffle. */
+    /** One answer as text, or null when it was not given (step 2 of an abandoned form, say). */
+    private static String answer(Map<String, Object> data, String key) {
+        Object value = data.get(key);
+        return value == null || text(value).isBlank() ? null : text(value);
+    }
+
+    private static Sort sortOf(String sort) {
+        Sort newest = Sort.by(Sort.Direction.DESC, "createdAt", "id");
+        if (sort == null || sort.isBlank()) return newest;
+        String[] parts = sort.split(",");
+        String property = SORTABLE.get(parts[0].trim());
+        if (property == null) {
+            throw ApiException.badRequest("Cannot sort by " + parts[0].trim() + ". Allowed: "
+                    + String.join(", ", new java.util.TreeSet<>(SORTABLE.keySet())) + ".");
+        }
+        Sort.Direction direction = parts.length > 1 && parts[1].trim().equalsIgnoreCase("desc")
+                ? Sort.Direction.DESC : Sort.Direction.ASC;
+        return Sort.by(direction, property).and(newest);
     }
 
     private ApplicationDtos.Row row(LoanApplication application) {
@@ -121,8 +158,16 @@ public class ClientRecordsService {
                 application.getClient().getPublicId(),
                 application.getClient().getEmail(),
                 name.isEmpty() ? null : name,
-                data.get("phone") == null ? null : text(data.get("phone")),
+                answer(data, "firstName"),
+                answer(data, "lastName"),
+                answer(data, "phone"),
+                answer(data, "birthDate"),
+                answer(data, "province"),
+                answer(data, "incomeType"),
+                answer(data, "employerName"),
                 application.getBrand().getName(),
+                application.getBrand().getLogoUrl(),
+                application.getBrand().getDomain(),
                 application.getStatus().name(),
                 application.getLeadscoutStatus(),
                 application.getRequestedAmount(),
@@ -185,7 +230,7 @@ public class ClientRecordsService {
     @Transactional(readOnly = true)
     public List<ApplicationDtos.BrandOption> brandOptions() {
         return brands.findAllByOrderByNameAscEmailAsc().stream()
-                .map(brand -> new ApplicationDtos.BrandOption(brand.getPublicId(), brand.getName()))
+                .map(brand -> new ApplicationDtos.BrandOption(brand.getPublicId(), brand.getName(), brand.getDomain()))
                 .toList();
     }
 

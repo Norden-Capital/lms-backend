@@ -105,7 +105,10 @@ class ClientRecordsTest {
         assertThat(row.path("email").asString()).isEqualTo(lead);
         assertThat(row.path("name").asString()).isEqualTo("Secretname Tester");
         assertThat(row.path("phone").asString()).isEqualTo("(514) 555-1234");
+        assertThat(row.path("firstName").asString()).isEqualTo("Secretname");
+        assertThat(row.path("province").isNull()).isFalse();
         assertThat(row.path("brand").asString()).isEqualTo("recordsone.ca");
+        assertThat(row.path("brandDomain").asString()).isEqualTo("recordsone.ca");
         assertThat(row.path("leadscoutStatus").asString()).isEqualTo("SOLD");
         assertThat(row.path("amount").asInt()).isEqualTo(1500);
         assertThat(row.path("test").asBoolean()).isTrue();
@@ -126,6 +129,23 @@ class ClientRecordsTest {
         assertThat(page.path("content").size()).isEqualTo(1);
         assertThat(page.path("totalElements").asInt()).isGreaterThanOrEqualTo(2);
         assertThat(page.path("content").get(0).path("email").asString()).isEqualTo(b);
+    }
+
+    @Test
+    void aListCanBeSortedByAColumn() throws Exception {
+        String first = "aaa" + email("sold");
+        String last = "zzz" + email("sold");
+        stepOne("recordsone.ca", last);
+        stepOne("recordsone.ca", first);
+
+        String all = "/api/applications?status=ABANDONED&size=100&search=-" + run + "-";
+        JsonNode up = read(all + "&sort=email,asc").path("content");
+        JsonNode down = read(all + "&sort=email,desc").path("content");
+        assertThat(up.get(0).path("email").asString()).isEqualTo(first);
+        assertThat(down.get(0).path("email").asString()).isEqualTo(last);
+
+        // Name and phone are encrypted, so they cannot be sorted.
+        mvc.perform(get(all + "&sort=name,asc").with(staff("CUSTOMER:READ"))).andExpect(status().isBadRequest());
     }
 
     @Test

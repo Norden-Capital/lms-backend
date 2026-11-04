@@ -27,15 +27,17 @@ public class ClientRecordsController {
     }
 
     @GetMapping("/applications")
-    @Operation(summary = "One list, newest first",
-               description = "`status` is LEAD, ABANDONED or FAILED. `search` looks at the email and the application's id.")
+    @Operation(summary = "One list, newest first unless sorted",
+               description = "`status` is LEAD, ABANDONED or FAILED. `search` looks at the email and the application's id. "
+                       + "`sort` is `field,direction`, the field one of id, email, brand, channel, amount, result or createdAt.")
     public PageResponse<ApplicationDtos.Row> list(@RequestParam ApplicationStatus status,
                                                   @RequestParam(required = false) String brand,
                                                   @RequestParam(required = false) String channel,
                                                   @RequestParam(required = false) String search,
                                                   @RequestParam(defaultValue = "0") int page,
-                                                  @RequestParam(defaultValue = "25") int size) {
-        return records.list(status, brand, channel, search, page, size);
+                                                  @RequestParam(defaultValue = "25") int size,
+                                                  @RequestParam(required = false) String sort) {
+        return records.list(status, brand, channel, search, page, size, sort);
     }
 
     @GetMapping("/applications/overview")

@@ -11,7 +11,10 @@ public final class ApplicationDtos {
     }
 
     /** One line in the Leads, Abandoned or Failed list. Null name or phone means it could not be read. */
-    public record Row(String id, String clientId, String email, String name, String phone, String brand,
+    public record Row(String id, String clientId, String email, String name, String firstName, String lastName,
+                      String phone, String birthDate, String province, String incomeType, String employer,
+                      String brand,
+                      String brandLogo, String brandDomain,
                       String status, String leadscoutStatus, int amount, String language, boolean test,
                       String channel, Instant createdAt, Instant updatedAt) {
     }
@@ -32,7 +35,7 @@ public final class ApplicationDtos {
     }
 
     /** A brand, for the filter on the lists. */
-    public record BrandOption(String id, String name) {
+    public record BrandOption(String id, String name, String domain) {
     }
 
     public record Overview(int days, boolean includeTest, int leads, int abandoned, int failed,
