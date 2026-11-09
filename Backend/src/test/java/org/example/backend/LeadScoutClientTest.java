@@ -82,7 +82,7 @@ class LeadScoutClientTest {
         JsonNode sent = json.readTree(received.getFirst());
         assertThat(sent.path("test").asBoolean()).isTrue();
         assertThat(sent.path("data").path("email").asString()).isEqualTo("test@test.com");
-        assertThat(sent.path("data").path("phone").asString()).isEqualTo("(555) 555-5555");
+        assertThat(sent.path("data").path("phone").asString()).isEqualTo("(514) 555-5555");
         assertThat(sent.path("type").asString()).isEqualTo("PERSONAL");
         assertThat(sent.path("language").asString()).isEqualTo("fr");
         assertThat(sent.path("ipAddress").asString()).isEqualTo("1.2.3.4");
@@ -93,6 +93,22 @@ class LeadScoutClientTest {
         assertThat(result.status()).isEqualTo("SOLD");
         assertThat(result.redirectUrl()).isEqualTo("https://offer.example/1");
         assertThat(result.tryAgain()).isFalse();
+    }
+
+    @Test
+    void debtIsSentAsOneOfLeadScoutsAmounts() {
+        LeadScoutClient client = client("test", "my-key", 5);
+        Map<String, Object> data = data();
+        data.put("unsecuredDebtAmount", 4000);
+
+        Map<String, Object> body = client.body(data, Map.of(), "en", "1.2.3.4", "Test Browser");
+
+        assertThat(((Map<?, ?>) body.get("data")).get("unsecuredDebtAmount")).isEqualTo(2500);
+        assertThat(data.get("unsecuredDebtAmount")).isEqualTo(4000);
+        assertThat(LeadScoutClient.nearestDebtAmount(0)).isEqualTo(0);
+        assertThat(LeadScoutClient.nearestDebtAmount(1250)).isEqualTo(2500);
+        assertThat(LeadScoutClient.nearestDebtAmount(5000)).isEqualTo(7500);
+        assertThat(LeadScoutClient.nearestDebtAmount(99_000)).isEqualTo(20000);
     }
 
     @Test

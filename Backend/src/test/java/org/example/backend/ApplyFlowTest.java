@@ -320,6 +320,14 @@ class ApplyFlowTest {
         owner.put("ownHome", "yes");
         postStepTwo(token, owner).andExpect(status().isBadRequest());
 
+        // LeadScout's minimums: home value 1,000 and mortgage 300.
+        owner.put("propertyValue", 999);
+        owner.put("propertyMortgage", 300);
+        postStepTwo(token, owner).andExpect(status().isBadRequest());
+        owner.put("propertyValue", 1000);
+        owner.put("propertyMortgage", 299);
+        postStepTwo(token, owner).andExpect(status().isBadRequest());
+
         Map<String, Object> badTime = ApplyTestSupport.stepTwo();
         badTime.put("timeAtAddress", 7);
         postStepTwo(token, badTime).andExpect(status().isBadRequest());

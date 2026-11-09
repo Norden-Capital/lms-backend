@@ -137,6 +137,17 @@ public final class ApplyDtos {
             return !owner() || (propertyValue != null && propertyMortgage != null);
         }
 
+        /** LeadScout's minimums for owners: home value 1,000, mortgage 300. Added 2026-11-09. */
+        @AssertTrue(message = "Home value must be at least $1,000.")
+        public boolean isHomeValueEnough() {
+            return !owner() || propertyValue == null || propertyValue >= 1000;
+        }
+
+        @AssertTrue(message = "Mortgage must be at least $300.")
+        public boolean isMortgageEnough() {
+            return !owner() || propertyMortgage == null || propertyMortgage >= 300;
+        }
+
         @AssertTrue(message = "Fill in your job details.")
         public boolean isJobComplete() {
             if (!working()) return true;

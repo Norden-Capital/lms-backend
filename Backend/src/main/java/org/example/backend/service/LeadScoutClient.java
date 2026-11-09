@@ -41,7 +41,10 @@ public class LeadScoutClient {
     public static final String LIVE = "live";
 
     private static final String TEST_EMAIL = "test@test.com";
-    private static final String TEST_PHONE = "(555) 555-5555";
+    /** LeadScout's docs: "Please use (514) 555-5555 for production testing." 555 is not a real area code. */
+    private static final String TEST_PHONE = "(514) 555-5555";
+    /** The only debt amounts LeadScout takes. Changed 2026-11-09. */
+    private static final int[] DEBT_AMOUNTS = {0, 2500, 7500, 10000, 15000, 20000};
     private static final String FAKE_LINK = "https://example.com/fake-offer";
 
     /**
@@ -88,6 +91,10 @@ public class LeadScoutClient {
     public Map<String, Object> body(Map<String, Object> data, Map<String, String> extra,
                                     String language, String ip, String userAgent) {
         Map<String, Object> sent = new LinkedHashMap<>(data);
+        // The person types any amount; LeadScout takes only a few. The LMS keeps what they typed.
+        if (sent.get("unsecuredDebtAmount") instanceof Number debt) {
+            sent.put("unsecuredDebtAmount", nearestDebtAmount(debt.intValue()));
+        }
         if (TEST.equals(mode)) {
             sent.put("email", TEST_EMAIL);
             sent.put("phone", TEST_PHONE);
@@ -179,6 +186,15 @@ public class LeadScoutClient {
         boolean hasLink = Set.of("SOLD", "CPF", "NOT_SOLD").contains(status) && !name.startsWith("nolink");
         String link = hasLink ? ",\"redirectUrl\":\"" + FAKE_LINK + "\"" : "";
         return read(200, "{\"fake\":true,\"status\":\"" + status + "\"" + link + "}", 0);
+    }
+
+    /** The closest amount LeadScout takes; a tie goes up. 4,000 becomes 2,500 and 5,000 becomes 7,500. */
+    public static int nearestDebtAmount(int debt) {
+        int best = DEBT_AMOUNTS[0];
+        for (int amount : DEBT_AMOUNTS) {
+            if (Math.abs(amount - debt) <= Math.abs(best - debt)) best = amount;
+        }
+        return best;
     }
 
     private static int millisSince(long startedNanos) {
