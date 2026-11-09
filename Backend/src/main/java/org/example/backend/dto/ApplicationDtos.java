@@ -23,7 +23,8 @@ public final class ApplicationDtos {
     public record ClientDetail(String id, String email, Instant createdAt, List<ApplicationDetail> applications) {
     }
 
-    public record ApplicationDetail(String id, String brand, String status, String leadscoutStatus, String redirectUrl,
+    public record ApplicationDetail(String id, String brand, String brandLogo, String brandDomain, String channel,
+                                    String status, String leadscoutStatus, String redirectUrl,
                                     int amount, String language, boolean test, Instant consentAt,
                                     Instant createdAt, Instant updatedAt, String ip, String userAgent,
                                     Map<String, Object> answers, Map<String, Object> tracking, List<Send> sends) {

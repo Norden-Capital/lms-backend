@@ -202,6 +202,9 @@ public class ClientRecordsService {
             details.add(new ApplicationDtos.ApplicationDetail(
                     application.getPublicId(),
                     application.getBrand().getName(),
+                    application.getBrand().getLogoUrl(),
+                    application.getBrand().getDomain(),
+                    application.getChannel(),
                     application.getStatus().name(),
                     application.getLeadscoutStatus(),
                     application.getRedirectUrl(),
