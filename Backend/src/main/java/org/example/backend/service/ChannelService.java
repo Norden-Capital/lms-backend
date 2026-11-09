@@ -142,6 +142,12 @@ public class ChannelService {
                 },
                 Date.valueOf(first));
 
+        // Everyone on step 1 was on the form, even when their visit was not counted
+        // (a blocked script, a form sent without the page). So visitors are never
+        // fewer than step 1, and no step shows more than 100%.
+        total[0] = Math.max(total[0], total[1]);
+        lines.values().forEach(line -> line[0] = Math.max(line[0], line[1]));
+
         List<ApplicationDtos.ChannelCount> channels = new ArrayList<>();
         lines.forEach((name, line) -> channels.add(new ApplicationDtos.ChannelCount(name, line[0], line[1], line[2], line[3])));
         channels.sort(Comparator.comparingInt(ApplicationDtos.ChannelCount::step1).reversed()

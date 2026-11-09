@@ -38,12 +38,23 @@ public interface LoanApplicationRepository
     @EntityGraph(attributePaths = "brand")
     List<LoanApplication> findByClientOrderByCreatedAtDescIdDesc(Client client);
 
-    /** Counts per day, brand, status and LeadScout answer: day, brand id, status, answer, count. */
+    /**
+     * One line per person, brand and day — their best outcome that day (lead, then
+     * failed, then abandoned) and its LeadScout answer: day, brand id, client id,
+     * status, answer. Changed 2026-11-09 from counting applications, so Leads
+     * Overview counts people everywhere, like its funnel: applying five times is
+     * still one person.
+     */
     @Query(value = """
-            SELECT to_char(a.created_at AT TIME ZONE :zone, 'YYYY-MM-DD'), a.brand_id, a.status, a.leadscout_status, count(*)
-            FROM loan_applications a
-            WHERE a.created_at >= :from AND a.mode IN (:modes)
-            GROUP BY 1, 2, 3, 4""", nativeQuery = true)
+            SELECT DISTINCT ON (d.client_id, d.brand_id, d.day) d.day, d.brand_id, d.client_id, d.status, d.leadscout_status
+            FROM (SELECT to_char(a.created_at AT TIME ZONE :zone, 'YYYY-MM-DD') AS day, a.brand_id, a.client_id,
+                         a.status, a.leadscout_status, a.created_at
+                  FROM loan_applications a
+                  WHERE a.created_at >= :from AND a.mode IN (:modes)
+                    AND a.status IN ('LEAD', 'FAILED', 'ABANDONED')) d
+            ORDER BY d.client_id, d.brand_id, d.day,
+                     CASE d.status WHEN 'LEAD' THEN 0 WHEN 'FAILED' THEN 1 ELSE 2 END, d.created_at DESC""",
+            nativeQuery = true)
     List<Object[]> dailyCounts(@Param("from") Instant from, @Param("zone") String zone,
                                @Param("modes") Collection<String> modes);
 

@@ -222,6 +222,23 @@ class ClientRecordsTest {
     }
 
     @Test
+    void theOverviewCountsEachPersonOnceWithTheirBestOutcome() throws Exception {
+        String brand = brands.findByDomain("recordstwo.ca").orElseThrow().getPublicId();
+        JsonNode before = read("/api/applications/overview?days=7&includeTest=true&brand=" + brand);
+
+        // The same person: stops after step 1, then applies twice in full.
+        String person = email("sold");
+        stepOne("recordstwo.ca", person);
+        stepTwo(stepOne("recordstwo.ca", person));
+        stepTwo(stepOne("recordstwo.ca", person));
+
+        JsonNode after = read("/api/applications/overview?days=7&includeTest=true&brand=" + brand);
+        assertThat(after.path("leads").asInt() - before.path("leads").asInt()).isEqualTo(1);
+        assertThat(after.path("abandoned").asInt() - before.path("abandoned").asInt()).isZero();
+        assertThat(after.path("funnel").path("visitors").asInt()).isGreaterThanOrEqualTo(after.path("funnel").path("step1").asInt());
+    }
+
+    @Test
     void testApplicationsAreLeftOutOfTheOverviewByDefault() throws Exception {
         String brand = brands.findByDomain("recordsone.ca").orElseThrow().getPublicId();
         stepTwo(stepOne("recordsone.ca", email("sold")));

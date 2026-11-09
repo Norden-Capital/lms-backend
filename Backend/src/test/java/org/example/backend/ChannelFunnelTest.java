@@ -164,9 +164,10 @@ class ChannelFunnelTest {
         // SEO: one finishes.
         stepTwo(stepOne(domain, email("sold"), null, null));
 
+        // No visits were counted, but everyone on step 1 was on the form.
         JsonNode funnel = funnel(domain);
-        assertThat(steps(line(funnel, "email"))).containsExactly(0, 4, 2, 1);
-        assertThat(steps(line(funnel, "seo"))).containsExactly(0, 1, 1, 1);
+        assertThat(steps(line(funnel, "email"))).containsExactly(4, 4, 2, 1);
+        assertThat(steps(line(funnel, "seo"))).containsExactly(1, 1, 1, 1);
         assertThat(List.of(funnel.path("step1").asInt(), funnel.path("step2").asInt(), funnel.path("step3").asInt()))
                 .containsExactly(5, 3, 2);
     }

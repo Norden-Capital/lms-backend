@@ -263,22 +263,35 @@ public class ClientRecordsService {
                 .findFirst()
                 .orElseThrow(() -> ApiException.badRequest("There is no such brand."));
 
-        int[] totals = new int[3];
+        // People, not applications (2026-11-09), so the cards, chart, tables and
+        // funnel agree: each person counts once a day in the chart, and once in the
+        // period's cards and brand table, with their best outcome (lead, then
+        // failed, then abandoned). A lead's LeadScout answer is its latest.
+        Map<Long, Object[]> bestOfPerson = new LinkedHashMap<>();
+        Map<String, Object[]> bestOfPersonAndBrand = new LinkedHashMap<>();
         for (Object[] line : applications.dailyCounts(from, zone.getId(), modes)) {
             String date = (String) line[0];
             Long brandId = ((Number) line[1]).longValue();
-            int column = columnOf((String) line[2]);
-            String answer = (String) line[3];
-            int count = ((Number) line[4]).intValue();
-
+            Long clientId = ((Number) line[2]).longValue();
+            int column = columnOf((String) line[3]);
             if (column < 0) continue;
-            perBrand.get(brandId)[column] += count;
+            Object[] outcome = {column, line[4]};
+
+            bestOfPersonAndBrand.merge(brandId + ":" + clientId, new Object[] {column, brandId}, ClientRecordsService::better);
             if (onlyBrand != null && !onlyBrand.equals(brandId)) continue;
-            totals[column] += count;
             int[] day = perDay.get(date);
-            if (day != null) day[column] += count;
-            if (column == 0 && leadscout.containsKey(answer)) leadscout.merge(answer, count, Integer::sum);
+            if (day != null) day[column]++;
+            // Later days come later for a person, so a tie keeps the latest answer.
+            bestOfPerson.merge(clientId, outcome, ClientRecordsService::better);
         }
+
+        int[] totals = new int[3];
+        bestOfPerson.values().forEach(outcome -> {
+            int column = (int) outcome[0];
+            totals[column]++;
+            if (column == 0 && leadscout.containsKey((String) outcome[1])) leadscout.merge((String) outcome[1], 1, Integer::sum);
+        });
+        bestOfPersonAndBrand.values().forEach(outcome -> perBrand.get((Long) outcome[1])[(int) outcome[0]]++);
 
         List<ApplicationDtos.Day> daily = perDay.entrySet().stream()
                 .map(e -> new ApplicationDtos.Day(e.getKey(), e.getValue()[0], e.getValue()[1], e.getValue()[2]))
@@ -292,6 +305,19 @@ public class ClientRecordsService {
                 .toList();
         return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, daily, byBrand,
                 channels.funnel(first, from, modes, onlyBrand));
+    }
+
+    /** The better of two outcomes {column, ...}: lead, then failed, then abandoned. A tie keeps the newer one. */
+    private static Object[] better(Object[] old, Object[] next) {
+        return rank((int) next[0]) <= rank((int) old[0]) ? next : old;
+    }
+
+    private static int rank(int column) {
+        return switch (column) {
+            case 0 -> 0;
+            case 2 -> 1;
+            default -> 2;
+        };
     }
 
     /** Leads, abandoned, failed. The rest are on their way or history, and are not counted. */
