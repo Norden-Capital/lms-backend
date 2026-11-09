@@ -222,8 +222,22 @@ jobs:
             # end rather than leave a dead credential on the server.
             echo "$GHCR_TOKEN" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-            # Pull the new image and start both backend and postgres
-            docker compose pull
+            # Pull the new image and start both backend and postgres.
+            # Up to 5 tries — added 2026-11-09: the server's link to GitHub
+            # sometimes drops mid-download ("connection reset by peer"). Each
+            # try keeps the layers already downloaded. The old version keeps
+            # running until a pull succeeds.
+            pulled=false
+            for try in 1 2 3 4 5; do
+              if docker compose pull; then pulled=true; break; fi
+              echo "Download failed (try $try of 5), trying again in 15s..."
+              sleep 15
+            done
+            if [ "$pulled" != true ]; then
+              docker logout ghcr.io
+              echo "::error::Could not download the new image after 5 tries"
+              exit 1
+            fi
             docker logout ghcr.io
             docker compose up -d
 
