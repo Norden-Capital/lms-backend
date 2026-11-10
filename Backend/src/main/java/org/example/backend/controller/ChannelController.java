@@ -32,6 +32,13 @@ public class ChannelController {
         return channels.list();
     }
 
+    @GetMapping("/applies")
+    @Operation(summary = "This year's applies per channel and brand",
+            description = "Forms sent in full, real ones only. Channel → brand id → count.")
+    public Map<String, Map<String, Integer>> applies() {
+        return channels.appliesThisYear();
+    }
+
     @PostMapping
     @Operation(summary = "Add a channel", description = "`name` is what goes after utm_source=, like email.")
     public List<String> add(@RequestBody Map<String, String> request,

@@ -198,6 +198,27 @@ class ChannelFunnelTest {
     }
 
     @Test
+    void appliesAreCountedPerChannelAndBrand() throws Exception {
+        String domain = newBrand();
+        stepTwo(stepOne(domain, email("sold"), "email", null));
+        stepTwo(stepOne(domain, email("error"), "email", null));
+        stepTwo(stepOne(domain, email("sold"), null, null));
+        // Stopped after step 1: not an apply.
+        stepOne(domain, email("sold"), "email", null);
+        // Tests are left out, so these count as real ones only from here.
+        db.update("UPDATE loan_applications SET mode = 'live' WHERE brand_id = ?",
+                brands.findByDomain(domain).orElseThrow().getId());
+
+        var owner = authentication(new UsernamePasswordAuthenticationToken(
+                new AuthPrincipal(null, "owner@example.com", "OWNER", null), null,
+                List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"))));
+        JsonNode applies = json.readTree(mvc.perform(get("/api/channels/applies").with(owner))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        assertThat(applies.path("email").path(brandId(domain)).asInt()).isEqualTo(2);
+        assertThat(applies.path("seo").path(brandId(domain)).asInt()).isEqualTo(1);
+    }
+
+    @Test
     void onlyTheOwnerManagesChannels() throws Exception {
         var owner = authentication(new UsernamePasswordAuthenticationToken(
                 new AuthPrincipal(null, "owner@example.com", "OWNER", null), null,

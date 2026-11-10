@@ -11,6 +11,7 @@ import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -98,6 +99,27 @@ public class ChannelService {
         }
         actionLog.record(ActionType.CHANNEL_REMOVED, actorId, null, name);
         return list();
+    }
+
+    /**
+     * This year's applies per channel and brand, counted like the Brands page:
+     * forms sent in full (step 2 done, whatever LeadScout said), real ones only,
+     * not tests. Channel → brand public id → count. Added 2026-11-10.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, Map<String, Integer>> appliesThisYear() {
+        Instant january = LocalDate.now(ZoneOffset.UTC).withDayOfYear(1).atStartOfDay().toInstant(ZoneOffset.UTC);
+        Map<String, Map<String, Integer>> result = new LinkedHashMap<>();
+        db.query("""
+                SELECT a.channel, b.public_id, count(*)
+                  FROM loan_applications a JOIN brands b ON b.id = a.brand_id
+                 WHERE a.created_at >= ? AND a.mode = 'live' AND a.status IN ('SENDING', 'LEAD', 'FAILED')
+                 GROUP BY a.channel, b.public_id""",
+                row -> {
+                    result.computeIfAbsent(row.getString(1), k -> new LinkedHashMap<>()).put(row.getString(2), row.getInt(3));
+                },
+                Timestamp.from(january));
+        return result;
     }
 
     // ── Leads Overview ───────────────────────────────────────────────────

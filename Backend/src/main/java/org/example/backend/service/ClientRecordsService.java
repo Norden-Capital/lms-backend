@@ -47,7 +47,8 @@ public class ClientRecordsService {
             Set.of(ApplicationStatus.LEAD, ApplicationStatus.ABANDONED, ApplicationStatus.FAILED);
     private static final Set<Integer> PERIODS = Set.of(7, 30, 90);
     private static final int MAX_PAGE_SIZE = 100;
-    private static final List<String> LEADSCOUT_ANSWERS = List.of("SOLD", "CPF", "NOT_SOLD", "EXISTS");
+    /** Every answer LeadScout can give, and NONE when it gave none (a timeout, say). All are listed, even at 0. */
+    private static final List<String> LEADSCOUT_ANSWERS = List.of("SOLD", "CPF", "NOT_SOLD", "EXISTS", "ERROR", "NONE");
 
     private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() {
     };
@@ -289,7 +290,11 @@ public class ClientRecordsService {
         bestOfPerson.values().forEach(outcome -> {
             int column = (int) outcome[0];
             totals[column]++;
-            if (column == 0 && leadscout.containsKey((String) outcome[1])) leadscout.merge((String) outcome[1], 1, Integer::sum);
+            // Everyone sent to LeadScout — leads and failed — has an answer; abandoned people were never sent.
+            if (column != 1) {
+                String answer = outcome[1] == null || ((String) outcome[1]).isBlank() ? "NONE" : (String) outcome[1];
+                leadscout.merge(leadscout.containsKey(answer) ? answer : "NONE", 1, Integer::sum);
+            }
         });
         bestOfPersonAndBrand.values().forEach(outcome -> perBrand.get((Long) outcome[1])[(int) outcome[0]]++);
 

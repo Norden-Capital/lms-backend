@@ -215,6 +215,9 @@ class ClientRecordsTest {
         assertThat(after.path("abandoned").asInt() - before.path("abandoned").asInt()).isEqualTo(1);
         assertThat(after.path("leadscout").path("SOLD").asInt() - before.path("leadscout").path("SOLD").asInt()).isEqualTo(1);
         assertThat(after.path("leadscout").path("EXISTS").asInt() - before.path("leadscout").path("EXISTS").asInt()).isEqualTo(1);
+        // Failed people have an answer too, and every answer is listed.
+        assertThat(after.path("leadscout").path("ERROR").asInt() - before.path("leadscout").path("ERROR").asInt()).isEqualTo(1);
+        assertThat(after.path("leadscout").has("NONE")).isTrue();
 
         JsonNode daily = after.path("daily");
         assertThat(daily.size()).isEqualTo(7);
