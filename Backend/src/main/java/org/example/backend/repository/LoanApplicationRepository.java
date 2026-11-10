@@ -50,12 +50,12 @@ public interface LoanApplicationRepository
             FROM (SELECT to_char(a.created_at AT TIME ZONE :zone, 'YYYY-MM-DD') AS day, a.brand_id, a.client_id,
                          a.status, a.leadscout_status, a.created_at
                   FROM loan_applications a
-                  WHERE a.created_at >= :from AND a.mode IN (:modes)
+                  WHERE a.created_at >= :from AND a.created_at < :until AND a.mode IN (:modes)
                     AND a.status IN ('LEAD', 'FAILED', 'ABANDONED')) d
             ORDER BY d.client_id, d.brand_id, d.day,
                      CASE d.status WHEN 'LEAD' THEN 0 WHEN 'FAILED' THEN 1 ELSE 2 END, d.created_at DESC""",
             nativeQuery = true)
-    List<Object[]> dailyCounts(@Param("from") Instant from, @Param("zone") String zone,
+    List<Object[]> dailyCounts(@Param("from") Instant from, @Param("until") Instant until, @Param("zone") String zone,
                                @Param("modes") Collection<String> modes);
 
     /**

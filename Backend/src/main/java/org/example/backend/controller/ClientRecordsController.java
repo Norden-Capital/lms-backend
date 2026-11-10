@@ -42,11 +42,14 @@ public class ClientRecordsController {
 
     @GetMapping("/applications/overview")
     @Operation(summary = "The numbers for Leads Overview",
-               description = "`days` is 7, 30 or 90. Test applications are left out unless `includeTest` is true.")
+               description = "`days` is 7, 30 or 90, or give `from` and `to` (yyyy-MM-dd) for your own dates. "
+                       + "Test applications are left out unless `includeTest` is true.")
     public ApplicationDtos.Overview overview(@RequestParam(defaultValue = "30") int days,
                                              @RequestParam(required = false) String brand,
-                                             @RequestParam(defaultValue = "false") boolean includeTest) {
-        return records.overview(days, brand, includeTest);
+                                             @RequestParam(defaultValue = "false") boolean includeTest,
+                                             @RequestParam(required = false) String from,
+                                             @RequestParam(required = false) String to) {
+        return records.overview(days, brand, includeTest, from, to);
     }
 
     @GetMapping("/applications/brands")

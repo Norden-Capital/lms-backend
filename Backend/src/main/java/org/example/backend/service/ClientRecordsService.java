@@ -241,15 +241,40 @@ public class ClientRecordsService {
     /** The numbers for Leads Overview: the last {@code days} days, on the business calendar. */
     @Transactional(readOnly = true)
     public ApplicationDtos.Overview overview(int days, String brand, boolean includeTest) {
-        if (!PERIODS.contains(days)) throw ApiException.badRequest("Choose 7, 30 or 90 days.");
+        return overview(days, brand, includeTest, null, null);
+    }
 
+    /**
+     * The last {@code days} days, or the owner's own dates when {@code start} and
+     * {@code end} are given (yyyy-MM-dd, both days counted) — added 2026-11-10.
+     */
+    public ApplicationDtos.Overview overview(int days, String brand, boolean includeTest, String start, String end) {
         LocalDate today = LocalDate.now(zone);
-        LocalDate first = today.minusDays(days - 1L);
+        LocalDate first;
+        LocalDate last;
+        if (start != null && !start.isBlank() && end != null && !end.isBlank()) {
+            try {
+                first = LocalDate.parse(start);
+                last = LocalDate.parse(end);
+            } catch (java.time.format.DateTimeParseException e) {
+                throw ApiException.badRequest("Dates look like 2026-11-10.");
+            }
+            if (last.isBefore(first)) throw ApiException.badRequest("The end comes before the start.");
+            if (last.isAfter(today)) last = today;
+            if (first.isAfter(last)) throw ApiException.badRequest("Pick dates up to today.");
+            if (first.plusDays(366).isBefore(last)) throw ApiException.badRequest("Pick a year or less.");
+            days = (int) java.time.temporal.ChronoUnit.DAYS.between(first, last) + 1;
+        } else {
+            if (!PERIODS.contains(days)) throw ApiException.badRequest("Choose 7, 30 or 90 days.");
+            last = today;
+            first = today.minusDays(days - 1L);
+        }
         Instant from = first.atStartOfDay(zone).toInstant();
+        Instant until = last.plusDays(1).atStartOfDay(zone).toInstant();
         List<String> modes = includeTest ? List.of("live", "test", "fake") : List.of("live");
 
         Map<String, int[]> perDay = new LinkedHashMap<>();
-        for (LocalDate day = first; !day.isAfter(today); day = day.plusDays(1)) {
+        for (LocalDate day = first; !day.isAfter(last); day = day.plusDays(1)) {
             perDay.put(day.toString(), new int[3]);
         }
         Map<Long, int[]> perBrand = new LinkedHashMap<>();
@@ -270,7 +295,7 @@ public class ClientRecordsService {
         // failed, then abandoned). A lead's LeadScout answer is its latest.
         Map<Long, Object[]> bestOfPerson = new LinkedHashMap<>();
         Map<String, Object[]> bestOfPersonAndBrand = new LinkedHashMap<>();
-        for (Object[] line : applications.dailyCounts(from, zone.getId(), modes)) {
+        for (Object[] line : applications.dailyCounts(from, until, zone.getId(), modes)) {
             String date = (String) line[0];
             Long brandId = ((Number) line[1]).longValue();
             Long clientId = ((Number) line[2]).longValue();
@@ -309,7 +334,7 @@ public class ClientRecordsService {
                 .sorted(Comparator.comparingInt(ApplicationDtos.BrandCount::leads).reversed())
                 .toList();
         return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, daily, byBrand,
-                channels.funnel(first, from, modes, onlyBrand));
+                channels.funnel(first, last, from, until, modes, onlyBrand));
     }
 
     /** The better of two outcomes {column, ...}: lead, then failed, then abandoned. A tie keeps the newer one. */

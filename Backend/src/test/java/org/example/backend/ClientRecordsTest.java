@@ -242,6 +242,28 @@ class ClientRecordsTest {
     }
 
     @Test
+    void theOverviewTakesYourOwnDates() throws Exception {
+        String brand = brands.findByDomain("recordsone.ca").orElseThrow().getPublicId();
+        stepTwo(stepOne("recordsone.ca", email("sold")));
+        java.time.LocalDate today = java.time.LocalDate.now();
+
+        // Around today: the new lead is in. A day past today is cut back to today.
+        JsonNode now = read("/api/applications/overview?includeTest=true&brand=" + brand
+                + "&from=" + today.minusDays(2) + "&to=" + today.plusDays(1));
+        assertThat(now.path("leads").asInt()).isPositive();
+
+        // A month long ago: nothing, but one line for each of its 31 days.
+        JsonNode old = read("/api/applications/overview?includeTest=true&brand=" + brand + "&from=2020-01-01&to=2020-01-31");
+        assertThat(old.path("leads").asInt()).isZero();
+        assertThat(old.path("days").asInt()).isEqualTo(31);
+        assertThat(old.path("daily").size()).isEqualTo(31);
+        assertThat(old.path("funnel").path("step1").asInt()).isZero();
+
+        mvc.perform(get("/api/applications/overview?from=2020-02-01&to=2020-01-01").with(staff("CUSTOMER:READ")))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void testApplicationsAreLeftOutOfTheOverviewByDefault() throws Exception {
         String brand = brands.findByDomain("recordsone.ca").orElseThrow().getPublicId();
         stepTwo(stepOne("recordsone.ca", email("sold")));

@@ -125,11 +125,12 @@ public class ChannelService {
     // ── Leads Overview ───────────────────────────────────────────────────
 
     /**
-     * Visitors and the three steps per channel, from {@code first} on. Every added
-     * channel and SEO get a line, even with nothing yet.
+     * Visitors and the three steps per channel, from {@code first} to {@code last}
+     * (both days counted). Every added channel and SEO get a line, even with nothing yet.
      */
     @Transactional(readOnly = true)
-    public ApplicationDtos.Funnel funnel(LocalDate first, Instant from, Collection<String> modes, Long brandId) {
+    public ApplicationDtos.Funnel funnel(LocalDate first, LocalDate last, Instant from, Instant until,
+                                         Collection<String> modes, Long brandId) {
         Map<String, int[]> lines = new LinkedHashMap<>();
         lines.put(SEO, new int[4]);
         list().forEach(name -> lines.put(name, new int[4]));
@@ -144,7 +145,7 @@ public class ChannelService {
                        count(DISTINCT client_id) FILTER (WHERE status IN ('SENDING', 'LEAD', 'FAILED')),
                        count(DISTINCT client_id) FILTER (WHERE status = 'LEAD' AND redirect_url IS NOT NULL)
                   FROM loan_applications
-                 WHERE created_at >= ? AND mode IN (%s)%s
+                 WHERE created_at >= ? AND created_at < ? AND mode IN (%s)%s
                  GROUP BY GROUPING SETS ((channel), ())""".formatted(modeList, brandRule),
                 row -> {
                     int[] line = row.getString(1) == null ? total : lines.computeIfAbsent(row.getString(1), k -> new int[4]);
@@ -152,17 +153,17 @@ public class ChannelService {
                     line[2] = row.getInt(3);
                     line[3] = row.getInt(4);
                 },
-                Timestamp.from(from));
+                Timestamp.from(from), Timestamp.from(until));
 
         db.query("""
                 SELECT channel, count(*) FROM form_visits
-                 WHERE day >= ?%s
+                 WHERE day >= ? AND day <= ?%s
                  GROUP BY GROUPING SETS ((channel), ())""".formatted(brandRule),
                 row -> {
                     int[] line = row.getString(1) == null ? total : lines.computeIfAbsent(row.getString(1), k -> new int[4]);
                     line[0] = row.getInt(2);
                 },
-                Date.valueOf(first));
+                Date.valueOf(first), Date.valueOf(last));
 
         // Everyone on step 1 was on the form, even when their visit was not counted
         // (a blocked script, a form sent without the page). So visitors are never
