@@ -13,10 +13,21 @@ import java.util.List;
 public record Appearance(String mode, String palette, String radius, String font, boolean cardFrame) {
 
     public static final List<String> MODES = List.of("light", "dark");
+    // Must match lib/appearance.ts in the frontend.
     public static final List<String> PALETTES = List.of(
-            "default", "claude", "caffeine", "darkmatter", "mono", "supabase", "sage-garden", "twitter", "sunset-horizon");
+            "default", "claude", "caffeine", "darkmatter", "mono", "supabase", "sage-garden",
+            "twitter", "sunset-horizon", "modern-minimal", "violet-bloom", "t3-chat", "mocha-mousse",
+            "bubblegum", "amethyst-haze", "notebook", "doom-64", "catppuccin", "graphite",
+            "perpetuity", "kodama-grove", "cosmic-night", "tangerine", "quantum-rose", "nature",
+            "bold-tech", "elegant-luxury", "amber-minimal", "neo-brutalism", "solar-dusk",
+            "claymorphism", "cyberpunk", "pastel-dreams", "clean-slate", "ocean-breeze",
+            "retro-arcade", "midnight-bloom", "candyland", "northern-lights", "vintage-paper",
+            "starry-night", "vercel", "soft-pop");
     public static final List<String> RADII = List.of("none", "small", "medium", "large", "full");
-    public static final List<String> FONTS = List.of("geist", "inter", "dm-sans", "ibm-plex-sans");
+    public static final List<String> FONTS = List.of(
+            "geist", "inter", "dm-sans", "ibm-plex-sans", "roboto", "open-sans", "poppins",
+            "montserrat", "nunito", "outfit", "figtree", "manrope", "plus-jakarta-sans",
+            "space-grotesk");
 
     /** The standard look: what everyone gets until they choose. */
     public static final Appearance STANDARD = new Appearance("light", "default", "medium", "geist", true);
