@@ -47,7 +47,10 @@ public record UserResponse(
         Instant emailVerifiedAt,
 
         /** When they finished two-factor enrolment. Null until they do. */
-        Instant mfaConfirmedAt
+        Instant mfaConfirmedAt,
+
+        /** How the app looks for them: Settings → Theme. Never null. */
+        Appearance appearance
 ) {
     public static UserResponse from(User user, Set<String> permissions) {
         return new UserResponse(
@@ -63,7 +66,8 @@ public record UserResponse(
                 user.getCreatedAt(),
                 user.getLastLoginAt(),
                 user.getEmailVerifiedAt(),
-                user.getMfaConfirmedAt()
+                user.getMfaConfirmedAt(),
+                Appearance.of(user.getAppearance())
         );
     }
 }

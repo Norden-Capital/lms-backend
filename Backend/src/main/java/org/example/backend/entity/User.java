@@ -96,6 +96,10 @@ public class User {
     @Column(name = "mfa_confirmed_at")
     private Instant mfaConfirmedAt;
 
+    /** Settings → Theme, as JSON — see Appearance. Null is the standard look. */
+    @Column(length = 500)
+    private String appearance;
+
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 

@@ -4,6 +4,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import org.example.backend.dto.Appearance;
 import org.example.backend.dto.ChangePasswordRequest;
 import org.example.backend.dto.MessageResponse;
 import org.example.backend.dto.SessionResponse;
@@ -25,6 +26,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -65,6 +67,28 @@ public class MyAccountController {
     public UserResponse updateMe(@AuthenticationPrincipal AuthPrincipal principal,
                                  @Valid @RequestBody UpdateUserRequest request) {
         return userService.updateMine(principal.userId(), request);
+    }
+
+    /** Settings → Theme — added 2026-11-11. Yours only; anyone signed in, the Owner too. */
+    @GetMapping("/appearance")
+    @Operation(summary = "How the app looks for you")
+    public Appearance appearance(@AuthenticationPrincipal AuthPrincipal principal) {
+        User me = userRepository.findById(principal.userId())
+                .orElseThrow(() -> ApiException.notFound("User not found."));
+        return Appearance.of(me.getAppearance());
+    }
+
+    @PutMapping("/appearance")
+    @Operation(summary = "Save how the app looks for you",
+               description = "mode light|dark, palette, radius none|small|medium|large|full, font, cardFrame.")
+    public Appearance saveAppearance(@AuthenticationPrincipal AuthPrincipal principal,
+                                     @RequestBody Appearance request) {
+        Appearance checked = request.checked();
+        User me = userRepository.findById(principal.userId())
+                .orElseThrow(() -> ApiException.notFound("User not found."));
+        me.setAppearance(checked.equals(Appearance.STANDARD) ? null : checked.toJson());
+        userRepository.save(me);
+        return checked;
     }
 
     @GetMapping("/sessions")
