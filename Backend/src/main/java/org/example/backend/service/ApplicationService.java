@@ -187,6 +187,9 @@ public class ApplicationService {
         asObject(stored.get("extra")).forEach((key, value) -> extra.put(key, String.valueOf(value)));
         extra.put("affiliate_sub1", application.getPublicId());
         extra.put("affiliate_sub2", application.getBrand().getDomain());
+        // Marks leads from our own form, so LeadScout reports tell them apart
+        // from leads that came through LeadScout's white label (2026-11-14).
+        extra.put("affiliate_sub3", "API");
 
         Map<String, Object> body = leadScout.body(data, extra, application.getLanguage(),
                 String.valueOf(stored.get("ip")), String.valueOf(stored.get("userAgent")));

@@ -48,6 +48,7 @@ class ApplyFlowTest {
     @Autowired JdbcTemplate db;
     @Autowired BrandRepository brands;
     @Autowired BrandService brandService;
+    @Autowired org.example.backend.service.EncryptionService encryption;
 
     /** Each test is its own visitor. */
     private String address;
@@ -134,6 +135,20 @@ class ApplyFlowTest {
                 WHERE a.step_token = ?""", String.class, token);
         assertThat(answers).doesNotContain("Secretname", "1990-03-15", "2200");
         assertThat(request).doesNotContain("Secretname", "1990-03-15", "2200");
+    }
+
+    @Test
+    void everySendIsMarkedAsOurs() throws Exception {
+        String token = startApplication(email("sold"));
+        finish(token);
+
+        String request = db.queryForObject("""
+                SELECT e.request FROM application_events e JOIN loan_applications a ON a.id = e.application_id
+                WHERE a.step_token = ?""", String.class, token);
+        JsonNode extra = json.readTree(encryption.decrypt(request)).path("extra");
+        assertThat(extra.path("affiliate_sub1").asString()).startsWith("AP");
+        assertThat(extra.path("affiliate_sub2").asString()).isEqualTo("testbrand.ca");
+        assertThat(extra.path("affiliate_sub3").asString()).isEqualTo("API");
     }
 
     @ParameterizedTest
