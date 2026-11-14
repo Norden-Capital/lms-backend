@@ -34,7 +34,7 @@ public class BackupController {
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasAuthority('BACKUP:READ')")
     @Operation(summary = "The state of the backups, and one page of the log",
                description = """
                        `sort` is `field,direction` — startedAt, outcome, sizeBytes or durationSeconds;
@@ -48,7 +48,7 @@ public class BackupController {
     }
 
     @PostMapping
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasAuthority('BACKUP:CREATE')")
     @Operation(summary = "Back up now",
                description = "Answers straight away with the run in progress. 409 if one is already running.")
     public ResponseEntity<BackupRunResponse> start(@AuthenticationPrincipal AuthPrincipal principal) {
@@ -56,7 +56,7 @@ public class BackupController {
     }
 
     @PostMapping("/{id}/download-link")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasAuthority('BACKUP:DOWNLOAD')")
     @Operation(summary = "A two-minute link to download one backup",
                description = "The link points at GET /api/backups/download and needs no sign-in — it is the proof.")
     public ResponseEntity<DownloadLinkResponse> downloadLink(@PathVariable String id,
@@ -78,7 +78,7 @@ public class BackupController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasAuthority('BACKUP:DELETE')")
     @Operation(summary = "Delete one backup",
                description = "Removes the file on the server and in Cloudflare R2. The line stays in the history.")
     public ResponseEntity<BackupRunResponse> delete(@PathVariable String id,

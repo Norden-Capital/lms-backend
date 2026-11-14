@@ -65,4 +65,11 @@ public class Module {
      */
     @Column(name = "admin_only", nullable = false)
     private boolean adminOnly;
+
+    /**
+     * An owner page (Brands, Backups…) — decided 2026-11-14. Only the Owner may
+     * give these, and only to an administrator. See V20.
+     */
+    @Column(name = "owner_only", nullable = false)
+    private boolean ownerOnly;
 }

@@ -49,6 +49,7 @@ public class UserPermissionService {
     private final PermissionService permissionService;
     private final AccessService accessService;
     private final ActionLogService actionLog;
+    private final AccountGuard accountGuard;
 
     public UserPermissionService(UserRepository userRepository,
                                  PermissionRepository permissionRepository,
@@ -56,7 +57,8 @@ public class UserPermissionService {
                                  ModuleRepository moduleRepository,
                                  PermissionService permissionService,
                                  AccessService accessService,
-                                 ActionLogService actionLog) {
+                                 ActionLogService actionLog,
+                                 AccountGuard accountGuard) {
         this.userRepository = userRepository;
         this.permissionRepository = permissionRepository;
         this.userPermissionRepository = userPermissionRepository;
@@ -64,6 +66,7 @@ public class UserPermissionService {
         this.permissionService = permissionService;
         this.accessService = accessService;
         this.actionLog = actionLog;
+        this.accountGuard = accountGuard;
     }
 
     /**
@@ -73,10 +76,15 @@ public class UserPermissionService {
      * granting yourself permissions, which makes every other check here
      * decorative.
      *
-     * <p><b>Rule 2 — not an administrator.</b> Administrator means everything,
-     * always. A grant would be a no-op and a deny would carve a quiet hole into a
-     * role that every screen shows as complete. Narrow the person by making them
-     * a Member, which is a visible decision.
+     * <p><b>Rule 2 — an administrator only gains owner pages.</b> Changed
+     * 2026-11-14. An administrator still has every normal page, always: nothing
+     * can be taken away from them (narrow the person by making them a Member,
+     * which is a visible decision). What can be added is the owner pages —
+     * Brands, Backups and the rest — and only the Owner may add them. The Owner
+     * account itself has everything and is never edited here.
+     *
+     * <p><b>Rule 2b — owner pages are for administrators only.</b> Never granted
+     * to a member, by anybody.
      *
      * <p><b>Rule 3 — admin-only modules cannot be granted individually.</b>
      * Management is not "a module Member happens not to have"; it is one no member
@@ -97,9 +105,10 @@ public class UserPermissionService {
         User user = userRepository.findWithRoleById(userId)
                 .orElseThrow(() -> ApiException.notFound("No user with id " + userId + "."));
 
-        if (Roles.grantsEverything(user.getRole().getName())) {
-            throw ApiException.badRequest(
-                    "Administrators and the Owner already have every permission.");
+        String role = user.getRole().getName();
+
+        if (Roles.OWNER.equals(role)) {
+            throw ApiException.badRequest("The Owner already has every permission.");
         }
 
         Map<String, Permission> catalogue = permissionsByAuthority();
@@ -116,7 +125,44 @@ public class UserPermissionService {
                     "These are both granted and denied: " + String.join(", ", new TreeSet<>(both)) + ".");
         }
 
-        rejectAdminOnlyGrants(granted);
+        Set<String> ownerModules = new HashSet<>();
+        moduleRepository.findByOwnerOnlyTrue().forEach(m -> ownerModules.add(m.getKey()));
+
+        if (Roles.ADMIN.equals(role)) {
+            // Rule 2. Checked before anything else is said about the request, so
+            // an administrator learns only that this is not theirs to do.
+            accountGuard.requireOwner(actingUserId,
+                    "Only the Owner can change an administrator's permissions.");
+
+            if (!denied.isEmpty()) {
+                throw ApiException.badRequest(
+                        "Administrators keep every normal page. Nothing can be removed from them.");
+            }
+
+            Set<String> notOwnerPages = new TreeSet<>();
+            for (String authority : granted) {
+                if (!ownerModules.contains(moduleOf(authority))) notOwnerPages.add(authority);
+            }
+            if (!notOwnerPages.isEmpty()) {
+                throw ApiException.badRequest(
+                        "Administrators already have these: " + String.join(", ", notOwnerPages) + ".");
+            }
+        } else {
+            // Rule 2b.
+            Set<String> ownerPages = new TreeSet<>();
+            for (String authority : granted) {
+                if (ownerModules.contains(moduleOf(authority))) ownerPages.add(authority);
+            }
+            for (String authority : denied) {
+                if (ownerModules.contains(moduleOf(authority))) ownerPages.add(authority);
+            }
+            if (!ownerPages.isEmpty()) {
+                throw ApiException.forbidden(
+                        "Only administrators can have owner pages: " + String.join(", ", ownerPages) + ".");
+            }
+
+            rejectAdminOnlyGrants(granted);
+        }
 
         Set<String> effective = effectiveAfter(user, granted, denied);
         requireReadBehindEverything(effective, catalogue);

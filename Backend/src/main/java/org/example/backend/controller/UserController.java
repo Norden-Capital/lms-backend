@@ -268,10 +268,15 @@ public class UserController {
                        Both lists replace whatever was there. A permission absent from both means
                        "no exception" — which is the only way an exception can be removed.
 
-                       Refused if: it is your own account; the account is an administrator, who
-                       holds everything by definition; a permission belongs to an admin-only
-                       module such as Management; or the result would let somebody create, edit,
-                       delete or export on a module they cannot read.
+                       Refused if: it is your own account; the account is the Owner, who holds
+                       everything; a permission belongs to an admin-only module such as Management;
+                       or the result would let somebody create, edit, delete or export on a module
+                       they cannot read.
+
+                       Owner pages (Brands, Channels setup, System Health, Backups, Action Log):
+                       only the Owner may give them, and only to an administrator. For an
+                       administrator, `granted` may hold owner-page permissions only, and `denied`
+                       must be empty.
 
                        Takes effect immediately — their cached access is cleared, not left to
                        expire.""")

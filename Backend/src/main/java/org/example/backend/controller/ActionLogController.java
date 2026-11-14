@@ -30,7 +30,7 @@ public class ActionLogController {
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasAuthority('ACTION_LOG:READ')")
     @Operation(summary = "The action log, newest first",
                description = """
                        The Owner only — administrators and members are refused. `action` narrows
@@ -50,7 +50,7 @@ public class ActionLogController {
     }
 
     @GetMapping("/sign-ins")
-    @PreAuthorize("hasRole('OWNER')")
+    @PreAuthorize("hasAuthority('ACTION_LOG:READ')")
     @Operation(summary = "One person's sign-ins per day",
                description = "The Owner only. `user` is a public id (NC-…). Only days with a sign-in or a failed try.")
     public List<SignInDay> signIns(@RequestParam String user) {

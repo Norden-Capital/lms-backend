@@ -47,7 +47,7 @@ public class AccessCatalogueService {
      * them makes it a decision instead of an accident.
      */
     private static final List<String> ACTION_ORDER =
-            List.of("READ", "CREATE", "UPDATE", "DELETE", "EXPORT",
+            List.of("READ", "CREATE", "UPDATE", "DOWNLOAD", "DELETE", "EXPORT",
                     "SEND", "ARCHIVE", "STAR");
 
     private final ModuleRepository moduleRepository;
@@ -94,6 +94,7 @@ public class AccessCatalogueService {
                     module.getLabel(),
                     module.getDescription(),
                     module.isAdminOnly(),
+                    module.isOwnerOnly(),
                     actions
             );
 

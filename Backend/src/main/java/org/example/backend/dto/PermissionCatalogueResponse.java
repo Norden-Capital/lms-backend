@@ -26,6 +26,8 @@ public record PermissionCatalogueResponse(List<Group> groups) {
      * @param adminOnly permissions here can only ever come from being an
      *                  administrator. The picker must not offer them to a member,
      *                  and the API refuses to grant them individually.
+     * @param ownerOnly an owner page: only the Owner may give it, and only to an
+     *                  administrator
      * @param actions   in the order they should be shown, read first — it is the
      *                  one every other action depends on
      */
@@ -33,6 +35,7 @@ public record PermissionCatalogueResponse(List<Group> groups) {
                          String label,
                          String description,
                          boolean adminOnly,
+                         boolean ownerOnly,
                          List<String> actions) {
     }
 }

@@ -12,4 +12,7 @@ public interface ModuleRepository extends JpaRepository<Module, String> {
 
     /** The modules a non-administrator may never hold, whatever is ticked for them. */
     List<Module> findByAdminOnlyTrue();
+
+    /** The owner pages: only the Owner gives them, only to an administrator. */
+    List<Module> findByOwnerOnlyTrue();
 }

@@ -17,7 +17,7 @@ import java.util.Map;
 @RequestMapping("/api/channels")
 @Tag(name = "Channels", description = "The marketing channels that get a link — the Owner only")
 @SecurityRequirement(name = "BearerAuth")
-@PreAuthorize("hasRole('OWNER')")
+// Each endpoint names its own permission — owner pages since 2026-11-14 (V20).
 public class ChannelController {
 
     private final ChannelService channels;
@@ -27,12 +27,14 @@ public class ChannelController {
     }
 
     @GetMapping
+    @PreAuthorize("hasAuthority('CHANNEL_SETUP:READ')")
     @Operation(summary = "Every channel with a link, by name")
     public List<String> list() {
         return channels.list();
     }
 
     @GetMapping("/applies")
+    @PreAuthorize("hasAuthority('CHANNEL_SETUP:READ')")
     @Operation(summary = "This year's applies per channel and brand",
             description = "Forms sent in full, real ones only. Channel → brand id → count.")
     public Map<String, Map<String, Integer>> applies() {
@@ -40,6 +42,7 @@ public class ChannelController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAuthority('CHANNEL_SETUP:CREATE')")
     @Operation(summary = "Add a channel", description = "`name` is what goes after utm_source=, like email.")
     public List<String> add(@RequestBody Map<String, String> request,
                             @AuthenticationPrincipal AuthPrincipal principal) {
@@ -47,6 +50,7 @@ public class ChannelController {
     }
 
     @DeleteMapping("/{name}")
+    @PreAuthorize("hasAuthority('CHANNEL_SETUP:DELETE')")
     @Operation(summary = "Remove a channel", description = "Its leads keep their channel.")
     public List<String> remove(@PathVariable String name, @AuthenticationPrincipal AuthPrincipal principal) {
         return channels.remove(name, principal.userId());
