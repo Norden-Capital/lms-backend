@@ -211,7 +211,9 @@ class ChannelFunnelTest {
 
         var owner = authentication(new UsernamePasswordAuthenticationToken(
                 new AuthPrincipal(null, "owner@example.com", "OWNER", null), null,
-                List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"))));
+                List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"),
+                        new SimpleGrantedAuthority("CHANNEL_SETUP:READ"), new SimpleGrantedAuthority("CHANNEL_SETUP:CREATE"),
+                        new SimpleGrantedAuthority("CHANNEL_SETUP:DELETE"))));
         JsonNode applies = json.readTree(mvc.perform(get("/api/channels/applies").with(owner))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
         assertThat(applies.path("email").path(brandId(domain)).asInt()).isEqualTo(2);
@@ -222,7 +224,9 @@ class ChannelFunnelTest {
     void onlyTheOwnerManagesChannels() throws Exception {
         var owner = authentication(new UsernamePasswordAuthenticationToken(
                 new AuthPrincipal(null, "owner@example.com", "OWNER", null), null,
-                List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"))));
+                List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"),
+                        new SimpleGrantedAuthority("CHANNEL_SETUP:READ"), new SimpleGrantedAuthority("CHANNEL_SETUP:CREATE"),
+                        new SimpleGrantedAuthority("CHANNEL_SETUP:DELETE"))));
         var staff = user("staff").authorities(
                 new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("CUSTOMER:READ"));
 
