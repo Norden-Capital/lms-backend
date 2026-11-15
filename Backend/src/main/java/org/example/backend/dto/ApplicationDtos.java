@@ -20,7 +20,9 @@ public final class ApplicationDtos {
     }
 
     /** A client, with every time they applied, newest first. */
-    public record ClientDetail(String id, String email, Instant createdAt, List<ApplicationDetail> applications) {
+    /** {@code unsubscribes}: the brands this person asked for no more emails from, newest first (added 2026-11-14). */
+    public record ClientDetail(String id, String email, Instant createdAt, List<ApplicationDetail> applications,
+                               List<UnsubscribeDtos.OnClient> unsubscribes) {
     }
 
     public record ApplicationDetail(String id, String brand, String brandLogo, String brandDomain, String channel,

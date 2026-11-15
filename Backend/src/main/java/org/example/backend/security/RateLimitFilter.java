@@ -31,6 +31,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * the limits are relaxed tenfold rather than shutting everybody out together.
  *
  * <p>The apply form has no limit here: a client may apply as often as they want.
+ * Unsubscribes have one (2026-11-14): nobody needs more than a few, and it slows
+ * a bot trying addresses.
  */
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
@@ -43,6 +45,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final Rule SIGN_IN = new Rule("sign-in", 10, Duration.ofMinutes(5));
     private static final Rule FORGOT = new Rule("forgot-password", 5, Duration.ofMinutes(15));
     private static final Rule LINKS = new Rule("email-links", 20, Duration.ofMinutes(15));
+    private static final Rule UNSUBSCRIBE = new Rule("unsubscribe", 10, Duration.ofMinutes(15));
 
     /** POST paths and the allowance each one draws from. */
     private static final Map<String, Rule> RULES = Map.of(
@@ -52,7 +55,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
             "/api/auth/password/reset/check", LINKS,
             "/api/auth/password/reset", LINKS,
             "/api/auth/invitation/check", LINKS,
-            "/api/auth/invitation/accept", LINKS
+            "/api/auth/invitation/accept", LINKS,
+            "/api/public/unsubscribes", UNSUBSCRIBE
     );
 
     private static final String REFUSAL =

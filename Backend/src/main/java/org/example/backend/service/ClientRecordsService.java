@@ -61,6 +61,7 @@ public class ClientRecordsService {
     private final EncryptionService encryption;
     private final ObjectMapper objectMapper;
     private final ZoneId zone;
+    private final UnsubscribeService unsubscribes;
 
     public ClientRecordsService(LoanApplicationRepository applications,
                                 ApplicationEventRepository events,
@@ -69,7 +70,9 @@ public class ClientRecordsService {
                                 ChannelService channels,
                                 EncryptionService encryption,
                                 ObjectMapper objectMapper,
-                                @Value("${app.seo.timezone:America/Toronto}") String timezone) {
+                                @Value("${app.seo.timezone:America/Toronto}") String timezone,
+                                UnsubscribeService unsubscribes) {
+        this.unsubscribes = unsubscribes;
         this.applications = applications;
         this.events = events;
         this.clients = clients;
@@ -221,7 +224,8 @@ public class ClientRecordsService {
                     asObject(stored.get("extra")),
                     sends));
         }
-        return new ApplicationDtos.ClientDetail(client.getPublicId(), client.getEmail(), client.getCreatedAt(), details);
+        return new ApplicationDtos.ClientDetail(client.getPublicId(), client.getEmail(), client.getCreatedAt(), details,
+                unsubscribes.forEmail(client.getEmail()));
     }
 
     private ApplicationDtos.Send send(ApplicationEvent event) {

@@ -93,6 +93,10 @@ public class SecurityConfig {
                             "/api/public/applications",
                             "/api/public/applications/*/finish").permitAll()
 
+                    // Unsubscribes from the brand websites' servers, checked the same way
+                    // (UnsubscribeController). Added 2026-11-14.
+                    .requestMatchers(HttpMethod.POST, "/api/public/unsubscribes").permitAll()
+
                     // The only genuinely anonymous auth endpoints. Listed one by
                     // one on purpose — a blanket /api/auth/** is what previously
                     // left 2FA setup open to the world.

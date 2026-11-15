@@ -38,6 +38,9 @@ public interface LoanApplicationRepository
     @EntityGraph(attributePaths = "brand")
     List<LoanApplication> findByClientOrderByCreatedAtDescIdDesc(Client client);
 
+    /** The person's latest application — its answers hold the name they gave last. */
+    Optional<LoanApplication> findFirstByClientOrderByCreatedAtDescIdDesc(Client client);
+
     /**
      * One line per person, brand and day — their best outcome that day (lead, then
      * failed, then abandoned) and its LeadScout answer: day, brand id, client id,

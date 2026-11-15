@@ -51,5 +51,8 @@ public enum ActionType {
     BRAND_UPDATED,
     BRAND_REMOVED,
     CHANNEL_ADDED,
-    CHANNEL_REMOVED
+    CHANNEL_REMOVED,
+    // ── Customers ─────────────────────────────────────────────────────────
+    /** Someone downloaded the unsubscribe list as a CSV file. */
+    UNSUBSCRIBES_EXPORTED
 }
