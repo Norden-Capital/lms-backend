@@ -150,7 +150,8 @@ class UnsubscribeTest {
     void theSameEmailTwiceIsOneRowWithTheNewReason() throws Exception {
         String email = email("twice");
         unsubscribe(domain, email, "NOT_INTERESTED", null);
-        unsubscribe(domain, " " + email.toUpperCase() + " ", "OTHER", "  Moved away  ");
+        // Upper case is the same person. (Spaces around an email are refused, like on the apply form.)
+        unsubscribe(domain, email.toUpperCase(), "OTHER", "  Moved away  ");
 
         JsonNode page = list("search=" + email);
         assertThat(page.path("totalElements").asInt()).isEqualTo(1);
