@@ -143,6 +143,8 @@ public class ApplicationService {
             open.setLanguage(form.language());
             open.setAnswers(encrypt(stored));
             applications.saveAndFlush(open);
+            // Every save counts as a try, with this visit's own channel.
+            channels.recordStepOne(open.getBrand().getId(), open.getId(), ChannelService.of(form.extra()), leadScout.mode());
 
             // A corrected email should not leave an empty person behind.
             if (before != null && !before.getId().equals(client.getId()) && !applications.existsByClient(before)) {
@@ -240,6 +242,8 @@ public class ApplicationService {
             application.setStatus(ApplicationStatus.FAILED);
         }
         applications.save(application);
+        channels.recordStepTwo(application.getBrand().getId(), application.getId(), application.getChannel(),
+                leadScout.mode(), link != null);
         return resultFor(application);
     }
 

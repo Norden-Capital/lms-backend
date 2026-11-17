@@ -253,6 +253,17 @@ public class ClientRecordsService {
      * {@code end} are given (yyyy-MM-dd, both days counted) — added 2026-11-10.
      */
     public ApplicationDtos.Overview overview(int days, String brand, boolean includeTest, String start, String end) {
+        return overview(days, brand, includeTest, start, end, ChannelService.PEOPLE);
+    }
+
+    /** {@code view} picks the funnel's numbers: "people" (each person once) or "tries" (every time) — 2026-11-17. */
+    @Transactional(readOnly = true)
+    public ApplicationDtos.Overview overview(int days, String brand, boolean includeTest, String start, String end,
+                                             String view) {
+        String funnelView = view == null || view.isBlank() ? ChannelService.PEOPLE : view.trim().toLowerCase(Locale.ROOT);
+        if (!ChannelService.PEOPLE.equals(funnelView) && !ChannelService.TRIES.equals(funnelView)) {
+            throw ApiException.badRequest("view is people or tries.");
+        }
         LocalDate today = LocalDate.now(zone);
         LocalDate first;
         LocalDate last;
@@ -338,7 +349,7 @@ public class ClientRecordsService {
                 .sorted(Comparator.comparingInt(ApplicationDtos.BrandCount::leads).reversed())
                 .toList();
         return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, daily, byBrand,
-                channels.funnel(first, last, from, until, modes, onlyBrand));
+                channels.funnel(first, last, from, until, modes, onlyBrand, funnelView));
     }
 
     /** The better of two outcomes {column, ...}: lead, then failed, then abandoned. A tie keeps the newer one. */

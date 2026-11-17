@@ -50,7 +50,12 @@ public final class ApplicationDtos {
      * People at each step, all channels together and per channel. Step 2 is
      * "sent step 2", step 3 is "got the link". Each person counts once per step.
      */
-    public record Funnel(int visitors, int step1, int step2, int step3, List<ChannelCount> channels) {
+    /**
+     * {@code view} is "people" or "tries". With tries, {@code exactFrom} is when
+     * every try started to be recorded; before it the numbers are the closest there are.
+     */
+    public record Funnel(int visitors, int step1, int step2, int step3, List<ChannelCount> channels,
+                         String view, Instant exactFrom) {
     }
 
     public record ChannelCount(String channel, int visitors, int step1, int step2, int step3) {

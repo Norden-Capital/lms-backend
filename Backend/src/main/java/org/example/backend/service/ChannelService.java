@@ -62,14 +62,38 @@ public class ChannelService {
         return name == null ? SEO : name;
     }
 
-    /** One more person on the form today. A second visit the same day changes nothing. */
+    /**
+     * One more person on the form today. A second visit the same day is still one
+     * visitor (and keeps its first channel), but adds an opening for the Tries view.
+     */
     @Transactional
     public void recordVisit(Long brandId, LocalDate day, String visitorId, String source) {
         String channel = clean(source);
         db.update("""
                 INSERT INTO form_visits (day, brand_id, visitor_id, channel) VALUES (?, ?, ?, ?)
-                ON CONFLICT DO NOTHING""",
+                ON CONFLICT (day, brand_id, visitor_id) DO UPDATE SET opens = form_visits.opens + 1""",
                 Date.valueOf(day), brandId, visitorId, channel == null ? SEO : channel);
+    }
+
+    /** A step-1 save, for the Tries view. {@code channel} is this visit's own. */
+    @Transactional
+    public void recordStepOne(Long brandId, Long applicationId, String channel, String mode) {
+        db.update("INSERT INTO form_steps (step, brand_id, application_id, channel, mode) VALUES (1, ?, ?, ?, ?)",
+                brandId, applicationId, channel, mode);
+    }
+
+    /**
+     * A step-2 click that was sent to LeadScout, for the Tries view. Its channel is
+     * that of the step 1 just before it — the same visit — else the application's.
+     */
+    @Transactional
+    public void recordStepTwo(Long brandId, Long applicationId, String fallbackChannel, String mode, boolean gotLink) {
+        db.update("""
+                INSERT INTO form_steps (step, brand_id, application_id, channel, mode, got_link)
+                VALUES (2, ?, ?, COALESCE((SELECT s.channel FROM form_steps s
+                                           WHERE s.application_id = ? AND s.step = 1
+                                           ORDER BY s.created_at DESC, s.id DESC LIMIT 1), ?), ?, ?)""",
+                brandId, applicationId, applicationId, fallbackChannel, mode, gotLink);
     }
 
     // ── Configuration → Channels ─────────────────────────────────────────
@@ -124,6 +148,9 @@ public class ChannelService {
 
     // ── Leads Overview ───────────────────────────────────────────────────
 
+    public static final String PEOPLE = "people";
+    public static final String TRIES = "tries";
+
     /**
      * Visitors and the three steps per channel, from {@code first} to {@code last}
      * (both days counted). Every added channel and SEO get a line, even with nothing yet.
@@ -131,6 +158,18 @@ public class ChannelService {
     @Transactional(readOnly = true)
     public ApplicationDtos.Funnel funnel(LocalDate first, LocalDate last, Instant from, Instant until,
                                          Collection<String> modes, Long brandId) {
+        return funnel(first, last, from, until, modes, brandId, PEOPLE);
+    }
+
+    /**
+     * {@code view} is {@link #PEOPLE} (each person once per step) or {@link #TRIES}
+     * (every time — 2026-11-17). Tries are exact from {@code form_tries_start}; days
+     * before it show the closest numbers there are: visits = visitors, step 1 =
+     * applications, step 2 = sends to LeadScout, got link = applications with a link.
+     */
+    @Transactional(readOnly = true)
+    public ApplicationDtos.Funnel funnel(LocalDate first, LocalDate last, Instant from, Instant until,
+                                         Collection<String> modes, Long brandId, String view) {
         Map<String, int[]> lines = new LinkedHashMap<>();
         lines.put(SEO, new int[4]);
         list().forEach(name -> lines.put(name, new int[4]));
@@ -138,6 +177,11 @@ public class ChannelService {
 
         String brandRule = brandId == null ? "" : " AND brand_id = " + brandId;
         String modeList = String.join(",", modes.stream().map(mode -> "'" + mode.replace("'", "") + "'").toList());
+        boolean tries = TRIES.equals(view);
+        Instant exactFrom = tries ? triesStart() : null;
+        if (tries) {
+            countTries(lines, total, from, until, exactFrom, modeList, brandId);
+        } else {
 
         db.query("""
                 SELECT channel,
@@ -154,11 +198,12 @@ public class ChannelService {
                     line[3] = row.getInt(4);
                 },
                 Timestamp.from(from), Timestamp.from(until));
+        }
 
         db.query("""
-                SELECT channel, count(*) FROM form_visits
+                SELECT channel, %s FROM form_visits
                  WHERE day >= ? AND day <= ?%s
-                 GROUP BY GROUPING SETS ((channel), ())""".formatted(brandRule),
+                 GROUP BY GROUPING SETS ((channel), ())""".formatted(tries ? "sum(opens)" : "count(*)", brandRule),
                 row -> {
                     int[] line = row.getString(1) == null ? total : lines.computeIfAbsent(row.getString(1), k -> new int[4]);
                     line[0] = row.getInt(2);
@@ -175,6 +220,61 @@ public class ChannelService {
         lines.forEach((name, line) -> channels.add(new ApplicationDtos.ChannelCount(name, line[0], line[1], line[2], line[3])));
         channels.sort(Comparator.comparingInt(ApplicationDtos.ChannelCount::step1).reversed()
                 .thenComparing(ApplicationDtos.ChannelCount::channel));
-        return new ApplicationDtos.Funnel(total[0], total[1], total[2], total[3], channels);
+        return new ApplicationDtos.Funnel(total[0], total[1], total[2], total[3], channels,
+                tries ? TRIES : PEOPLE, exactFrom);
+    }
+
+    /** When the tries started to be recorded one by one (migration V22). */
+    private Instant triesStart() {
+        return db.queryForObject("SELECT started_at FROM form_tries_start", Timestamp.class).toInstant();
+    }
+
+    /** Steps 1–3 as tries: exact from {@code exactFrom}, the closest numbers before it. */
+    private void countTries(Map<String, int[]> lines, int[] total, Instant from, Instant until, Instant exactFrom,
+                            String modeList, Long brandId) {
+        String brandRule = brandId == null ? "" : " AND brand_id = " + brandId;
+        String appBrandRule = brandId == null ? "" : " AND a.brand_id = " + brandId;
+
+        // Exact: one line per try.
+        Instant newFrom = from.isAfter(exactFrom) ? from : exactFrom;
+        if (newFrom.isBefore(until)) {
+            db.query("""
+                    SELECT channel,
+                           count(*) FILTER (WHERE step = 1),
+                           count(*) FILTER (WHERE step = 2),
+                           count(*) FILTER (WHERE step = 2 AND got_link)
+                      FROM form_steps
+                     WHERE created_at >= ? AND created_at < ? AND mode IN (%s)%s
+                     GROUP BY GROUPING SETS ((channel), ())""".formatted(modeList, brandRule),
+                    row -> { add(lines, total, row.getString(1), 1, row.getInt(2), row.getInt(3), row.getInt(4)); },
+                    Timestamp.from(newFrom), Timestamp.from(until));
+        }
+
+        // Before that: applications (step 1 and got link) and LeadScout sends (step 2).
+        Instant oldUntil = until.isBefore(exactFrom) ? until : exactFrom;
+        if (from.isBefore(oldUntil)) {
+            db.query("""
+                    SELECT channel,
+                           count(*),
+                           count(*) FILTER (WHERE status = 'LEAD' AND redirect_url IS NOT NULL)
+                      FROM loan_applications
+                     WHERE created_at >= ? AND created_at < ? AND mode IN (%s)%s
+                     GROUP BY GROUPING SETS ((channel), ())""".formatted(modeList, brandRule),
+                    row -> { add(lines, total, row.getString(1), 1, row.getInt(2), 0, row.getInt(3)); },
+                    Timestamp.from(from), Timestamp.from(oldUntil));
+            db.query("""
+                    SELECT a.channel, count(*)
+                      FROM application_events e JOIN loan_applications a ON a.id = e.application_id
+                     WHERE e.created_at >= ? AND e.created_at < ? AND a.mode IN (%s)%s
+                     GROUP BY GROUPING SETS ((a.channel), ())""".formatted(modeList, appBrandRule),
+                    row -> { add(lines, total, row.getString(1), 2, row.getInt(2)); },
+                    Timestamp.from(from), Timestamp.from(oldUntil));
+        }
+    }
+
+    /** Adds counts to a channel's line (or the total, for the grouping's empty set), from {@code column} on. */
+    private static void add(Map<String, int[]> lines, int[] total, String channel, int column, int... counts) {
+        int[] line = channel == null ? total : lines.computeIfAbsent(channel, k -> new int[4]);
+        for (int i = 0; i < counts.length; i++) line[column + i] += counts[i];
     }
 }

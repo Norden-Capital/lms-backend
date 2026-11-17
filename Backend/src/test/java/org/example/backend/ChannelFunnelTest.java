@@ -250,4 +250,87 @@ class ChannelFunnelTest {
                         .content("{\"host\":\"apply.x.ca\",\"visitorId\":\"visitor-dddd-4444\"}"))
                 .andExpect(status().isForbidden());
     }
+
+    // ── People / Tries (2026-11-17) ──────────────────────────────────────
+
+    private ResultActions overview(String domain, String view) throws Exception {
+        return mvc.perform(get("/api/applications/overview?days=7&includeTest=true&brand=" + brandId(domain) + "&view=" + view)
+                .with(user("staff").authorities(
+                        new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL),
+                        new SimpleGrantedAuthority("CUSTOMER:READ"))));
+    }
+
+    private JsonNode funnel(String domain, String view) throws Exception {
+        return json.readTree(overview(domain, view).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString()).path("funnel");
+    }
+
+    /**
+     * One person opens the form twice from fb, comes back from seo, saves step 1 both
+     * times and gets a link; another is refused by LeadScout and clicks twice.
+     */
+    private String everyKindOfTry() throws Exception {
+        String domain = newBrand();
+        String twice = "v-" + UUID.randomUUID();
+        visit(domain, twice, "fb");
+        visit(domain, twice, "fb");
+        visit(domain, "v-" + UUID.randomUUID(), null);
+
+        String person = email("sold");
+        String token = stepOne(domain, person, "fb", null);
+        assertThat(stepOne(domain, person, null, null)).isEqualTo(token);
+        stepTwo(token);
+
+        String refused = stepOne(domain, email("error"), "fb", null);
+        stepTwo(refused);
+        stepTwo(refused);
+        return domain;
+    }
+
+    @Test
+    void triesCountEveryTimeWithEachVisitsChannel() throws Exception {
+        JsonNode funnel = funnel(everyKindOfTry(), "tries");
+
+        assertThat(funnel.path("view").asString()).isEqualTo("tries");
+        assertThat(funnel.path("exactFrom").isNull()).isFalse();
+        // fb: 2 openings, 2 step-1 saves, the refused person's 2 clicks, no link.
+        assertThat(steps(line(funnel, "fb"))).containsExactly(2, 2, 2, 0);
+        // seo: the return visit, its step-1 save, and the step 2 that followed it, with the link.
+        assertThat(steps(line(funnel, "seo"))).containsExactly(1, 1, 1, 1);
+        assertThat(List.of(funnel.path("visitors").asInt(), funnel.path("step1").asInt(),
+                funnel.path("step2").asInt(), funnel.path("step3").asInt())).containsExactly(3, 3, 3, 1);
+    }
+
+    @Test
+    void peopleIsStillTheDefault() throws Exception {
+        String domain = everyKindOfTry();
+        JsonNode people = funnel(domain, "people");
+        assertThat(people.path("view").asString()).isEqualTo("people");
+        assertThat(people.path("exactFrom").isNull()).isTrue();
+        // Each person once, under their application's first channel.
+        assertThat(steps(line(people, "fb"))).containsExactly(2, 2, 2, 1);
+        assertThat(funnel(domain)).isEqualTo(people);
+    }
+
+    @Test
+    void daysBeforeTheTriesStartedUseTheClosestNumbers() throws Exception {
+        String domain = everyKindOfTry();
+        java.sql.Timestamp start = db.queryForObject("SELECT started_at FROM form_tries_start", java.sql.Timestamp.class);
+        try {
+            // As if everything above happened before the tries were recorded.
+            db.update("UPDATE form_tries_start SET started_at = now() + interval '1 hour'");
+            JsonNode funnel = funnel(domain, "tries");
+            // Applications (2, both first from fb), LeadScout sends (1 + the refused one's 2 x 2 with retries),
+            // and applications with a link (1).
+            assertThat(steps(line(funnel, "fb"))).containsExactly(2, 2, 5, 1);
+            assertThat(steps(line(funnel, "seo"))).containsExactly(1, 0, 0, 0);
+        } finally {
+            db.update("UPDATE form_tries_start SET started_at = ?", start);
+        }
+    }
+
+    @Test
+    void anUnknownViewIsRefused() throws Exception {
+        overview(newBrand(), "clicks").andExpect(status().isBadRequest());
+    }
 }
