@@ -197,13 +197,14 @@ public class ApplicationService {
         application.setMode(leadScout.mode());
         applications.save(application);
 
+        // Owner, 2026-11-17: LeadScout learns nothing about our channels. Its "Source"
+        // (aff_utm_source) is always "API", to tell our form's leads from its white
+        // label's; no other utm value and no affiliate_sub3 are sent. The LMS keeps the
+        // visitor's own utm values and channel for itself (stored "extra", channel).
         Map<String, String> extra = new LinkedHashMap<>();
-        asObject(stored.get("extra")).forEach((key, value) -> extra.put(key, String.valueOf(value)));
+        extra.put("aff_utm_source", "API");
         extra.put("affiliate_sub1", application.getPublicId());
         extra.put("affiliate_sub2", application.getBrand().getDomain());
-        // Marks leads from our own form, so LeadScout reports tell them apart
-        // from leads that came through LeadScout's white label (2026-11-14).
-        extra.put("affiliate_sub3", "API");
 
         Map<String, Object> body = leadScout.body(data, extra, application.getLanguage(),
                 String.valueOf(stored.get("ip")), String.valueOf(stored.get("userAgent")));

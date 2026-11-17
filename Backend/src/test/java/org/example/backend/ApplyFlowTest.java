@@ -21,6 +21,7 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.LocalDate;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -138,17 +139,33 @@ class ApplyFlowTest {
     }
 
     @Test
-    void everySendIsMarkedAsOurs() throws Exception {
-        String token = startApplication(email("sold"));
+    void everySendIsMarkedAsOursAndHidesOurChannels() throws Exception {
+        Map<String, Object> form = ApplyTestSupport.stepOne(HOST, email("sold"));
+        form.put("extra", Map.of("aff_utm_source", "facebook", "aff_utm_medium", "cpc",
+                "aff_utm_campaign", "black-friday", "aff_utm_content", "ad-2", "aff_utm_term", "loan"));
+        String token = json.readTree(postStepOne(form).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString()).path("stepToken").asString();
         finish(token);
 
         String request = db.queryForObject("""
                 SELECT e.request FROM application_events e JOIN loan_applications a ON a.id = e.application_id
                 WHERE a.step_token = ?""", String.class, token);
         JsonNode extra = json.readTree(encryption.decrypt(request)).path("extra");
+        // Exactly these three: LeadScout's Source is always API, and nothing about our channels.
+        List<String> names = new java.util.ArrayList<>();
+        extra.propertyNames().forEach(names::add);
+        assertThat(names).containsExactlyInAnyOrder("aff_utm_source", "affiliate_sub1", "affiliate_sub2");
+        assertThat(extra.path("aff_utm_source").asString()).isEqualTo("API");
         assertThat(extra.path("affiliate_sub1").asString()).startsWith("AP");
         assertThat(extra.path("affiliate_sub2").asString()).isEqualTo("testbrand.ca");
-        assertThat(extra.path("affiliate_sub3").asString()).isEqualTo("API");
+
+        // The LMS still keeps the visitor's own channel and tags.
+        assertThat(db.queryForObject("SELECT channel FROM loan_applications WHERE step_token = ?", String.class, token))
+                .isEqualTo("facebook");
+        String answers = db.queryForObject("SELECT answers FROM loan_applications WHERE step_token = ?", String.class, token);
+        JsonNode kept = json.readTree(encryption.decrypt(answers)).path("extra");
+        assertThat(kept.path("aff_utm_source").asString()).isEqualTo("facebook");
+        assertThat(kept.path("aff_utm_campaign").asString()).isEqualTo("black-friday");
     }
 
     @ParameterizedTest
@@ -239,13 +256,11 @@ class ApplyFlowTest {
         assertThat(count("SELECT count(*) FROM loan_applications WHERE step_token = ? "
                 + "AND created_at < now() - interval '2 days' AND updated_at > now() - interval '1 hour'", first)).isEqualTo(1);
 
-        // It finishes as that same row, and LeadScout still gets the first source.
+        // It finishes as that same row, and the LMS still holds the first source.
         finish(second);
         assertThat(statusOf(first)).isEqualTo("LEAD");
-        String request = db.queryForObject("""
-                SELECT e.request FROM application_events e JOIN loan_applications a ON a.id = e.application_id
-                WHERE a.step_token = ?""", String.class, first);
-        assertThat(json.readTree(encryption.decrypt(request)).path("extra").path("aff_utm_source").asString()).isEqualTo("fb");
+        String answers = db.queryForObject("SELECT answers FROM loan_applications WHERE step_token = ?", String.class, first);
+        assertThat(json.readTree(encryption.decrypt(answers)).path("extra").path("aff_utm_source").asString()).isEqualTo("fb");
     }
 
     @Test
