@@ -59,6 +59,8 @@ public class ApplicationService {
 
     /** A send this old was cut off (a restart, a crash), so the person may press the button again. */
     private static final Duration SENDING_TOO_LONG = Duration.ofMinutes(5);
+    /** How long an unfinished application waits for the same person to come back to it. */
+    static final Duration REUSE_OPEN_FOR = Duration.ofHours(24);
 
     private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() {
     };
@@ -97,7 +99,12 @@ public class ApplicationService {
         this.retryDelayMs = retryDelayMs;
     }
 
-    /** Saves step 1: a new application, or the same one when the person came back with Previous. */
+    /**
+     * Saves step 1: a new application, or the same one when the person came back
+     * with Previous — or, since 2026-11-17, when the same person (same email) fills
+     * step 1 again on the same brand within {@link #REUSE_OPEN_FOR} without finishing:
+     * one abandoned application, not one per try.
+     */
     public String saveStepOne(ApplyDtos.StepOne form, String ip) {
         return transaction.execute(status -> {
             Brand brand = brandOf(form.host());
@@ -107,6 +114,11 @@ public class ApplicationService {
                     : applications.lockByStepToken(form.stepToken())
                             .filter(a -> a.getStatus() == ApplicationStatus.ABANDONED)
                             .orElse(null);
+            if (open == null) {
+                open = applications.lockOpen(client, brand, ApplicationStatus.ABANDONED,
+                                Instant.now().minus(REUSE_OPEN_FOR))
+                        .stream().findFirst().orElse(null);
+            }
 
             Map<String, Object> stored = new LinkedHashMap<>();
             stored.put("data", form.answers());

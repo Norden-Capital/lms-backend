@@ -30,6 +30,20 @@ public interface LoanApplicationRepository
     @Query("SELECT a FROM LoanApplication a WHERE a.stepToken = :token")
     Optional<LoanApplication> lockByStepToken(@Param("token") String token);
 
+    /**
+     * The person's unfinished applications on one brand, touched since {@code since},
+     * newest first. Locked, like {@link #lockByStepToken}, so step 1 can reuse one.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            SELECT a FROM LoanApplication a
+            WHERE a.client = :client AND a.brand = :brand AND a.status = :status AND a.updatedAt > :since
+            ORDER BY a.updatedAt DESC, a.id DESC""")
+    List<LoanApplication> lockOpen(@Param("client") Client client,
+                                   @Param("brand") org.example.backend.entity.Brand brand,
+                                   @Param("status") ApplicationStatus status,
+                                   @Param("since") Instant since);
+
     /** A list's page: client and brand come along, so the rows need no extra queries. */
     @Override
     @EntityGraph(attributePaths = {"client", "brand"})

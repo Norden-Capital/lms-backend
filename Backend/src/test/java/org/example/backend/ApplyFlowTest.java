@@ -199,24 +199,69 @@ class ApplyFlowTest {
         assertThat(sendsOf(token)).isEqualTo(4);
     }
 
+    private int applicationsOf(String email) {
+        return count("""
+                SELECT count(*) FROM loan_applications a JOIN clients c ON c.id = a.client_id
+                WHERE c.email = ?""", email);
+    }
+
+    /**
+     * Step 1 again without finishing, same person and brand: the same abandoned
+     * application, with the new answers — not a second row (2026-11-17).
+     */
     @Test
-    void onePersonIsOneRowWithAnApplicationEachTime() throws Exception {
+    void startingAgainReusesTheUnfinishedApplication() throws Exception {
         String email = email("sold");
         String first = startApplication(email);
-        String second = startApplication(email.toUpperCase());
+        Map<String, Object> again = ApplyTestSupport.stepOne(HOST, email.toUpperCase());
+        again.put("requestedAmount", 2500);
+        String second = json.readTree(postStepOne(again).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString()).path("stepToken").asString();
 
-        assertThat(first).isNotEqualTo(second);
+        assertThat(second).isEqualTo(first);
         assertThat(count("SELECT count(*) FROM clients WHERE email = ?", email)).isEqualTo(1);
-        assertThat(count("""
-                SELECT count(*) FROM loan_applications a JOIN clients c ON c.id = a.client_id
-                WHERE c.email = ?""", email)).isEqualTo(2);
+        assertThat(applicationsOf(email)).isEqualTo(1);
+        assertThat(count("SELECT requested_amount FROM loan_applications WHERE step_token = ?", first)).isEqualTo(2500);
+
+        // And it can still be finished.
+        finish(second);
+        assertThat(statusOf(first)).isEqualTo("LEAD");
+    }
+
+    @Test
+    void aFinishedApplicationIsNeverReused() throws Exception {
+        String email = email("sold");
+        String first = startApplication(email);
+        finish(first);
+
+        String second = startApplication(email);
+        assertThat(second).isNotEqualTo(first);
+        assertThat(applicationsOf(email)).isEqualTo(2);
+    }
+
+    @Test
+    void anOldOrOtherBrandTryIsNotReused() throws Exception {
+        if (brands.findByDomain("otherbrand.ca").isEmpty()) brands.save(brand("otherbrand.ca", true));
+        String email = email("sold");
+        String first = startApplication(email);
+
+        String otherBrand = json.readTree(postStepOne(ApplyTestSupport.stepOne("apply.otherbrand.ca", email))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("stepToken").asString();
+        assertThat(otherBrand).isNotEqualTo(first);
+
+        db.update("UPDATE loan_applications SET updated_at = now() - interval '25 hours' WHERE step_token = ?", first);
+        assertThat(startApplication(email)).isNotEqualTo(first);
+        assertThat(applicationsOf(email)).isEqualTo(3);
     }
 
     @Test
     void becomingALeadTakesOldTriesOutOfAbandoned() throws Exception {
         String email = email("sold");
         String oldTry = startApplication(email);
+        // More than a day ago, so the new try is a new application.
+        db.update("UPDATE loan_applications SET updated_at = now() - interval '2 days' WHERE step_token = ?", oldTry);
         String newTry = startApplication(email);
+        assertThat(newTry).isNotEqualTo(oldTry);
 
         finish(newTry);
 
