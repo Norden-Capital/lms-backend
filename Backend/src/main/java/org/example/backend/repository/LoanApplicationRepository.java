@@ -31,18 +31,17 @@ public interface LoanApplicationRepository
     Optional<LoanApplication> lockByStepToken(@Param("token") String token);
 
     /**
-     * The person's unfinished applications on one brand, touched since {@code since},
-     * newest first. Locked, like {@link #lockByStepToken}, so step 1 can reuse one.
+     * The person's unfinished applications on one brand, oldest first — the first
+     * one is kept open. Locked, like {@link #lockByStepToken}, so step 1 can reuse one.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("""
             SELECT a FROM LoanApplication a
-            WHERE a.client = :client AND a.brand = :brand AND a.status = :status AND a.updatedAt > :since
-            ORDER BY a.updatedAt DESC, a.id DESC""")
+            WHERE a.client = :client AND a.brand = :brand AND a.status = :status
+            ORDER BY a.createdAt ASC, a.id ASC""")
     List<LoanApplication> lockOpen(@Param("client") Client client,
                                    @Param("brand") org.example.backend.entity.Brand brand,
-                                   @Param("status") ApplicationStatus status,
-                                   @Param("since") Instant since);
+                                   @Param("status") ApplicationStatus status);
 
     /** A list's page: client and brand come along, so the rows need no extra queries. */
     @Override

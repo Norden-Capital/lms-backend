@@ -59,8 +59,6 @@ public class ApplicationService {
 
     /** A send this old was cut off (a restart, a crash), so the person may press the button again. */
     private static final Duration SENDING_TOO_LONG = Duration.ofMinutes(5);
-    /** How long an unfinished application waits for the same person to come back to it. */
-    static final Duration REUSE_OPEN_FOR = Duration.ofHours(24);
 
     private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() {
     };
@@ -101,9 +99,11 @@ public class ApplicationService {
 
     /**
      * Saves step 1: a new application, or the same one when the person came back
-     * with Previous — or, since 2026-11-17, when the same person (same email) fills
-     * step 1 again on the same brand within {@link #REUSE_OPEN_FOR} without finishing:
-     * one abandoned application, not one per try.
+     * with Previous — or when the same email fills step 1 again on the same brand
+     * while an unfinished (abandoned) application is open, however long ago: one
+     * abandoned application per email and brand, not one per try (owner, 2026-11-17).
+     * The open one gets the newest answers but keeps its first channel and tracking,
+     * and its created date. After a lead or a failure, the next try is a new one.
      */
     public String saveStepOne(ApplyDtos.StepOne form, String ip) {
         return transaction.execute(status -> {
@@ -115,14 +115,14 @@ public class ApplicationService {
                             .filter(a -> a.getStatus() == ApplicationStatus.ABANDONED)
                             .orElse(null);
             if (open == null) {
-                open = applications.lockOpen(client, brand, ApplicationStatus.ABANDONED,
-                                Instant.now().minus(REUSE_OPEN_FOR))
+                open = applications.lockOpen(client, brand, ApplicationStatus.ABANDONED)
                         .stream().findFirst().orElse(null);
             }
 
             Map<String, Object> stored = new LinkedHashMap<>();
             stored.put("data", form.answers());
-            stored.put("extra", tracking(form.extra()));
+            // Where they first came from stays: a later visit from SEO does not undo the Facebook ad.
+            stored.put("extra", open == null ? tracking(form.extra()) : asObject(decrypt(open.getAnswers()).get("extra")));
             stored.put("ip", ip);
             stored.put("userAgent", form.userAgent() == null ? "" : form.userAgent());
 
@@ -134,11 +134,11 @@ public class ApplicationService {
                         .status(ApplicationStatus.ABANDONED)
                         .mode(leadScout.mode())
                         .consentAt(Instant.now())
+                        .channel(ChannelService.of(form.extra()))
                         .build();
             }
             Client before = open.getClient();
             open.setClient(client);
-            open.setChannel(ChannelService.of(form.extra()));
             open.setRequestedAmount(form.requestedAmount());
             open.setLanguage(form.language());
             open.setAnswers(encrypt(stored));

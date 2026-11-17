@@ -205,16 +205,28 @@ class ApplyFlowTest {
                 WHERE c.email = ?""", email);
     }
 
+    private String startOn(String host, String email, String source) throws Exception {
+        Map<String, Object> form = ApplyTestSupport.stepOne(host, email);
+        form.put("extra", source == null ? Map.of() : Map.of("aff_utm_source", source));
+        return json.readTree(postStepOne(form).andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString()).path("stepToken").asString();
+    }
+
     /**
-     * Step 1 again without finishing, same person and brand: the same abandoned
-     * application, with the new answers — not a second row (2026-11-17).
+     * Step 1 again without finishing, same email and brand — even days later: the
+     * same abandoned application, with the newest answers but its first channel and
+     * created date. Not a second row (owner, 2026-11-17).
      */
     @Test
     void startingAgainReusesTheUnfinishedApplication() throws Exception {
         String email = email("sold");
-        String first = startApplication(email);
+        String first = startOn(HOST, email, "fb");
+        db.update("UPDATE loan_applications SET created_at = now() - interval '3 days', "
+                + "updated_at = now() - interval '3 days' WHERE step_token = ?", first);
+
         Map<String, Object> again = ApplyTestSupport.stepOne(HOST, email.toUpperCase());
         again.put("requestedAmount", 2500);
+        again.put("extra", Map.of());
         String second = json.readTree(postStepOne(again).andExpect(status().isOk())
                 .andReturn().getResponse().getContentAsString()).path("stepToken").asString();
 
@@ -222,10 +234,18 @@ class ApplyFlowTest {
         assertThat(count("SELECT count(*) FROM clients WHERE email = ?", email)).isEqualTo(1);
         assertThat(applicationsOf(email)).isEqualTo(1);
         assertThat(count("SELECT requested_amount FROM loan_applications WHERE step_token = ?", first)).isEqualTo(2500);
+        assertThat(db.queryForObject("SELECT channel FROM loan_applications WHERE step_token = ?", String.class, first))
+                .isEqualTo("fb");
+        assertThat(count("SELECT count(*) FROM loan_applications WHERE step_token = ? "
+                + "AND created_at < now() - interval '2 days' AND updated_at > now() - interval '1 hour'", first)).isEqualTo(1);
 
-        // And it can still be finished.
+        // It finishes as that same row, and LeadScout still gets the first source.
         finish(second);
         assertThat(statusOf(first)).isEqualTo("LEAD");
+        String request = db.queryForObject("""
+                SELECT e.request FROM application_events e JOIN loan_applications a ON a.id = e.application_id
+                WHERE a.step_token = ?""", String.class, first);
+        assertThat(json.readTree(encryption.decrypt(request)).path("extra").path("aff_utm_source").asString()).isEqualTo("fb");
     }
 
     @Test
@@ -240,26 +260,25 @@ class ApplyFlowTest {
     }
 
     @Test
-    void anOldOrOtherBrandTryIsNotReused() throws Exception {
+    void anotherBrandIsAnotherApplication() throws Exception {
         if (brands.findByDomain("otherbrand.ca").isEmpty()) brands.save(brand("otherbrand.ca", true));
         String email = email("sold");
         String first = startApplication(email);
 
-        String otherBrand = json.readTree(postStepOne(ApplyTestSupport.stepOne("apply.otherbrand.ca", email))
-                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("stepToken").asString();
+        String otherBrand = startOn("apply.otherbrand.ca", email, null);
         assertThat(otherBrand).isNotEqualTo(first);
-
-        db.update("UPDATE loan_applications SET updated_at = now() - interval '25 hours' WHERE step_token = ?", first);
-        assertThat(startApplication(email)).isNotEqualTo(first);
-        assertThat(applicationsOf(email)).isEqualTo(3);
+        // Back on the first brand, a week later: still the first application.
+        db.update("UPDATE loan_applications SET updated_at = now() - interval '7 days' WHERE step_token = ?", first);
+        assertThat(startApplication(email)).isEqualTo(first);
+        assertThat(applicationsOf(email)).isEqualTo(2);
     }
 
     @Test
     void becomingALeadTakesOldTriesOutOfAbandoned() throws Exception {
+        if (brands.findByDomain("otherbrand.ca").isEmpty()) brands.save(brand("otherbrand.ca", true));
         String email = email("sold");
-        String oldTry = startApplication(email);
-        // More than a day ago, so the new try is a new application.
-        db.update("UPDATE loan_applications SET updated_at = now() - interval '2 days' WHERE step_token = ?", oldTry);
+        // An unfinished try on another brand.
+        String oldTry = startOn("apply.otherbrand.ca", email, null);
         String newTry = startApplication(email);
         assertThat(newTry).isNotEqualTo(oldTry);
 
