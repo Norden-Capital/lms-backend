@@ -156,8 +156,8 @@ class ApplyFlowTest {
         extra.propertyNames().forEach(names::add);
         assertThat(names).containsExactlyInAnyOrder("aff_utm_source", "affiliate_sub1", "affiliate_sub2");
         assertThat(extra.path("aff_utm_source").asString()).isEqualTo("API");
-        assertThat(extra.path("affiliate_sub1").asString()).startsWith("AP");
-        assertThat(extra.path("affiliate_sub2").asString()).isEqualTo("testbrand.ca");
+        assertThat(extra.path("affiliate_sub1").asString()).isEqualTo("testbrand.ca");
+        assertThat(extra.path("affiliate_sub2").asString()).startsWith("AP");
 
         // The LMS still keeps the visitor's own channel and tags.
         assertThat(db.queryForObject("SELECT channel FROM loan_applications WHERE step_token = ?", String.class, token))

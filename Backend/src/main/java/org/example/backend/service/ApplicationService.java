@@ -201,10 +201,11 @@ public class ApplicationService {
         // (aff_utm_source) is always "API", to tell our form's leads from its white
         // label's; no other utm value and no affiliate_sub3 are sent. The LMS keeps the
         // visitor's own utm values and channel for itself (stored "extra", channel).
+        // Owner, 2026-11-18: sub1 is the brand domain, sub2 is our application id.
         Map<String, String> extra = new LinkedHashMap<>();
         extra.put("aff_utm_source", "API");
-        extra.put("affiliate_sub1", application.getPublicId());
-        extra.put("affiliate_sub2", application.getBrand().getDomain());
+        extra.put("affiliate_sub1", application.getBrand().getDomain());
+        extra.put("affiliate_sub2", application.getPublicId());
 
         Map<String, Object> body = leadScout.body(data, extra, application.getLanguage(),
                 String.valueOf(stored.get("ip")), String.valueOf(stored.get("userAgent")));
