@@ -241,6 +241,84 @@ class ClientRecordsTest {
         assertThat(after.path("funnel").path("visitors").asInt()).isGreaterThanOrEqualTo(after.path("funnel").path("step1").asInt());
     }
 
+    private static int sum(JsonNode daily, String field) {
+        int total = 0;
+        for (JsonNode point : daily) total += point.path(field).asInt();
+        return total;
+    }
+
+    @Test
+    void theChartCanShowHoursDaysOrWeeks() throws Exception {
+        String brand = brands.findByDomain("recordstwo.ca").orElseThrow().getPublicId();
+        stepTwo(stepOne("recordstwo.ca", email("sold")));
+        stepOne("recordstwo.ca", email("sold"));
+        String base = "/api/applications/overview?days=7&includeTest=true&brand=" + brand;
+
+        // Day stays the default, so nothing breaks.
+        JsonNode days = read(base);
+        assertThat(days.path("bucket").asString()).isEqualTo("day");
+        assertThat(days.path("daily").size()).isEqualTo(7);
+        assertThat(days.path("daily").get(0).path("date").asString()).matches("[0-9]{4}-[0-9]{2}-[0-9]{2}");
+
+        // Hours: every hour of every day, empty ones as 0. Same people, cut finer.
+        JsonNode hours = read(base + "&bucket=hour");
+        assertThat(hours.path("bucket").asString()).isEqualTo("hour");
+        assertThat(hours.path("daily").size()).isEqualTo(7 * 24);
+        assertThat(hours.path("daily").get(0).path("date").asString()).endsWith("T00");
+        assertThat(hours.path("daily").get(23).path("date").asString()).endsWith("T23");
+        assertThat(sum(hours.path("daily"), "leads")).isEqualTo(sum(days.path("daily"), "leads"));
+        assertThat(sum(hours.path("daily"), "abandoned")).isEqualTo(sum(days.path("daily"), "abandoned"));
+
+        // Weeks: 7-day blocks from the range's first day.
+        JsonNode weeks = read(base + "&bucket=week");
+        assertThat(weeks.path("daily").size()).isEqualTo(1);
+        assertThat(weeks.path("daily").get(0).path("date").asString()).isEqualTo(days.path("daily").get(0).path("date").asString());
+        assertThat(weeks.path("daily").get(0).path("leads").asInt()).isPositive();
+    }
+
+    @Test
+    void longRangesCanBeGroupedByCalendarMonth() throws Exception {
+        // 15 Jan to 10 Apr: four months, the first and last cut to the range.
+        JsonNode months = read("/api/applications/overview?from=2020-01-15&to=2020-04-10&bucket=month");
+        assertThat(months.path("bucket").asString()).isEqualTo("month");
+        JsonNode daily = months.path("daily");
+        assertThat(daily.size()).isEqualTo(4);
+        assertThat(daily.get(0).path("date").asString()).isEqualTo("2020-01");
+        assertThat(daily.get(3).path("date").asString()).isEqualTo("2020-04");
+        assertThat(daily.get(1).path("leads").asInt()).isZero();
+
+        // This month holds the same people as its days.
+        String brand = brands.findByDomain("recordstwo.ca").orElseThrow().getPublicId();
+        String person = email("sold");
+        stepOne("recordstwo.ca", person);
+        stepTwo(stepOne("recordstwo.ca", person));
+        String base = "/api/applications/overview?days=7&includeTest=true&brand=" + brand;
+        JsonNode days = read(base);
+        JsonNode month = read(base + "&bucket=month");
+        assertThat(sum(month.path("daily"), "leads")).isEqualTo(sum(days.path("daily"), "leads"));
+        assertThat(month.path("daily").size()).isBetween(1, 2);
+    }
+
+    @Test
+    void weeksStartOnTheRangesFirstDayAndTheLastCanBeShorter() throws Exception {
+        JsonNode weeks = read("/api/applications/overview?from=2020-01-01&to=2020-03-30&bucket=week");
+        JsonNode daily = weeks.path("daily");
+        assertThat(daily.size()).isEqualTo(13);
+        assertThat(daily.get(0).path("date").asString()).isEqualTo("2020-01-01");
+        assertThat(daily.get(1).path("date").asString()).isEqualTo("2020-01-08");
+        assertThat(daily.get(12).path("date").asString()).isEqualTo("2020-03-25");
+        assertThat(daily.get(12).path("leads").asInt()).isZero();
+
+        JsonNode oneDay = read("/api/applications/overview?from=2020-01-01&to=2020-01-01&bucket=hour");
+        assertThat(oneDay.path("daily").size()).isEqualTo(24);
+        assertThat(oneDay.path("daily").get(9).path("date").asString()).isEqualTo("2020-01-01T09");
+
+        mvc.perform(get("/api/applications/overview?days=30&bucket=hour").with(staff("CUSTOMER:READ")))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/applications/overview?days=7&bucket=year").with(staff("CUSTOMER:READ")))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void theOverviewTakesYourOwnDates() throws Exception {
         String brand = brands.findByDomain("recordsone.ca").orElseThrow().getPublicId();

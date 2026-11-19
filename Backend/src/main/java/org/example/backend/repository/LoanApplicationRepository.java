@@ -55,20 +55,23 @@ public interface LoanApplicationRepository
     Optional<LoanApplication> findFirstByClientOrderByCreatedAtDescIdDesc(Client client);
 
     /**
-     * One line per person, brand and day — their best outcome that day (lead, then
+     * One line per person, brand and hour — their best outcome that hour (lead, then
      * failed, then abandoned) and its LeadScout answer: day, brand id, client id,
      * status, answer. Changed 2026-11-09 from counting applications, so Leads
      * Overview counts people everywhere, like its funnel: applying five times is
-     * still one person.
+     * still one person. Since 2026-11-19 the key is the hour ("2026-11-19T14", LMS
+     * zone), so the chart can show hours, days or weeks; the caller groups them.
+     * The 6th column is the channel (one line per channel too) for the channel table.
      */
     @Query(value = """
-            SELECT DISTINCT ON (d.client_id, d.brand_id, d.day) d.day, d.brand_id, d.client_id, d.status, d.leadscout_status
-            FROM (SELECT to_char(a.created_at AT TIME ZONE :zone, 'YYYY-MM-DD') AS day, a.brand_id, a.client_id,
-                         a.status, a.leadscout_status, a.created_at
+            SELECT DISTINCT ON (d.client_id, d.brand_id, d.day, d.channel)
+                   d.day, d.brand_id, d.client_id, d.status, d.leadscout_status, d.channel
+            FROM (SELECT to_char(a.created_at AT TIME ZONE :zone, 'YYYY-MM-DD"T"HH24') AS day, a.brand_id, a.client_id,
+                         a.status, a.leadscout_status, a.created_at, a.channel
                   FROM loan_applications a
                   WHERE a.created_at >= :from AND a.created_at < :until AND a.mode IN (:modes)
                     AND a.status IN ('LEAD', 'FAILED', 'ABANDONED')) d
-            ORDER BY d.client_id, d.brand_id, d.day,
+            ORDER BY d.client_id, d.brand_id, d.day, d.channel,
                      CASE d.status WHEN 'LEAD' THEN 0 WHEN 'FAILED' THEN 1 ELSE 2 END, d.created_at DESC""",
             nativeQuery = true)
     List<Object[]> dailyCounts(@Param("from") Instant from, @Param("until") Instant until, @Param("zone") String zone,

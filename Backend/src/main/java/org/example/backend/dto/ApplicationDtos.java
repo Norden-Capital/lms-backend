@@ -41,8 +41,9 @@ public final class ApplicationDtos {
     public record BrandOption(String id, String name, String domain, String logoUrl) {
     }
 
+    /** {@code bucket} is hour, day, week or month: what each line of {@code daily} covers (2026-11-19). */
     public record Overview(int days, boolean includeTest, int leads, int abandoned, int failed,
-                           Map<String, Integer> leadscout, List<Day> daily, List<BrandCount> brands,
+                           Map<String, Integer> leadscout, String bucket, List<Day> daily, List<BrandCount> brands,
                            Funnel funnel) {
     }
 
@@ -58,13 +59,18 @@ public final class ApplicationDtos {
                          String view, Instant exactFrom) {
     }
 
-    public record ChannelCount(String channel, int visitors, int step1, int step2, int step3) {
+    /** leads/abandoned/failed: each person once per channel, best result (2026-11-19). */
+    public record ChannelCount(String channel, int visitors, int step1, int step2, int step3,
+                               int leads, int abandoned, int failed) {
     }
 
     /** One day of the chart, with no gaps: a day with nothing still has its line. */
+    /** {@code date}: "2026-11-19T14" for an hour, "2026-11-19" for a day, a week's first day for a week, "2026-11" for a month. */
     public record Day(String date, int leads, int abandoned, int failed) {
     }
 
-    public record BrandCount(String id, String name, int leads, int abandoned, int failed) {
+    /** visitors and steps follow the funnel's view, per brand (2026-11-19). */
+    public record BrandCount(String id, String name, int visitors, int step1, int step2, int step3,
+                             int leads, int abandoned, int failed) {
     }
 }

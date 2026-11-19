@@ -44,14 +44,16 @@ public class ClientRecordsController {
     @Operation(summary = "The numbers for Leads Overview",
                description = "`days` is 7, 30 or 90, or give `from` and `to` (yyyy-MM-dd) for your own dates. "
                        + "Test applications are left out unless `includeTest` is true. "
-                       + "`view` (people or tries) changes only the funnel: each person once per step, or every time.")
+                       + "`view` (people or tries) changes only the funnel: each person once per step, or every time. "
+                       + "`bucket` (hour, day, week or month) is what each point of the chart covers; hour is for 7 days or less.")
     public ApplicationDtos.Overview overview(@RequestParam(defaultValue = "30") int days,
                                              @RequestParam(required = false) String brand,
                                              @RequestParam(defaultValue = "false") boolean includeTest,
                                              @RequestParam(required = false) String from,
                                              @RequestParam(required = false) String to,
-                                             @RequestParam(defaultValue = "people") String view) {
-        return records.overview(days, brand, includeTest, from, to, view);
+                                             @RequestParam(defaultValue = "people") String view,
+                                             @RequestParam(defaultValue = "day") String bucket) {
+        return records.overview(days, brand, includeTest, from, to, view, bucket);
     }
 
     @GetMapping("/applications/brands")

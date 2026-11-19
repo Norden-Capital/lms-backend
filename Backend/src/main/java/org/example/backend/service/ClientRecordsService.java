@@ -256,10 +256,24 @@ public class ClientRecordsService {
         return overview(days, brand, includeTest, start, end, ChannelService.PEOPLE);
     }
 
+    public ApplicationDtos.Overview overview(int days, String brand, boolean includeTest, String start, String end,
+                                             String view) {
+        return overview(days, brand, includeTest, start, end, view, DAY);
+    }
+
+    public static final String HOUR = "hour";
+    public static final String DAY = "day";
+    public static final String WEEK = "week";
+    public static final String MONTH = "month";
+
     /** {@code view} picks the funnel's numbers: "people" (each person once) or "tries" (every time) — 2026-11-17. */
     @Transactional(readOnly = true)
     public ApplicationDtos.Overview overview(int days, String brand, boolean includeTest, String start, String end,
-                                             String view) {
+                                             String view, String bucket) {
+        String size = bucket == null || bucket.isBlank() ? DAY : bucket.trim().toLowerCase(Locale.ROOT);
+        if (!HOUR.equals(size) && !DAY.equals(size) && !WEEK.equals(size) && !MONTH.equals(size)) {
+            throw ApiException.badRequest("bucket is hour, day, week or month.");
+        }
         String funnelView = view == null || view.isBlank() ? ChannelService.PEOPLE : view.trim().toLowerCase(Locale.ROOT);
         if (!ChannelService.PEOPLE.equals(funnelView) && !ChannelService.TRIES.equals(funnelView)) {
             throw ApiException.badRequest("view is people or tries.");
@@ -287,11 +301,19 @@ public class ClientRecordsService {
         Instant from = first.atStartOfDay(zone).toInstant();
         Instant until = last.plusDays(1).atStartOfDay(zone).toInstant();
         List<String> modes = includeTest ? List.of("live", "test", "fake") : List.of("live");
+        if (HOUR.equals(size) && days > 7) throw ApiException.badRequest("Hours are for 7 days or less.");
 
+        // The chart's points (2026-11-19): every hour, day or 7-day block of the
+        // range, empty ones as 0. Weeks start on the range's first day.
         Map<String, int[]> perDay = new LinkedHashMap<>();
         for (LocalDate day = first; !day.isAfter(last); day = day.plusDays(1)) {
-            perDay.put(day.toString(), new int[3]);
+            if (HOUR.equals(size)) {
+                for (int hour = 0; hour < 24; hour++) perDay.put(hourKey(day, hour), new int[3]);
+            } else {
+                perDay.putIfAbsent(bucketOf(day.toString() + "T00", size, first), new int[3]);
+            }
         }
+        Map<String, Integer> bestInBucket = new LinkedHashMap<>();
         Map<Long, int[]> perBrand = new LinkedHashMap<>();
         Map<String, Integer> leadscout = new LinkedHashMap<>();
         LEADSCOUT_ANSWERS.forEach(answer -> leadscout.put(answer, 0));
@@ -310,21 +332,31 @@ public class ClientRecordsService {
         // failed, then abandoned). A lead's LeadScout answer is its latest.
         Map<Long, Object[]> bestOfPerson = new LinkedHashMap<>();
         Map<String, Object[]> bestOfPersonAndBrand = new LinkedHashMap<>();
+        Map<String, Object[]> bestOfPersonAndChannel = new LinkedHashMap<>();
         for (Object[] line : applications.dailyCounts(from, until, zone.getId(), modes)) {
-            String date = (String) line[0];
+            String date = bucketOf((String) line[0], size, first);
             Long brandId = ((Number) line[1]).longValue();
             Long clientId = ((Number) line[2]).longValue();
             int column = columnOf((String) line[3]);
             if (column < 0) continue;
             Object[] outcome = {column, line[4]};
 
-            bestOfPersonAndBrand.merge(brandId + ":" + clientId, new Object[] {column, brandId}, ClientRecordsService::better);
+            // Since 2026-11-19 a picked brand counts in the brand table alone, too.
             if (onlyBrand != null && !onlyBrand.equals(brandId)) continue;
-            int[] day = perDay.get(date);
-            if (day != null) day[column]++;
+            bestOfPersonAndBrand.merge(brandId + ":" + clientId, new Object[] {column, brandId}, ClientRecordsService::better);
+            String channel = (String) line[5];
+            bestOfPersonAndChannel.merge(channel + "|" + clientId, new Object[] {column, channel}, ClientRecordsService::better);
+            // Each person once per brand and point, with their best outcome there.
+            bestInBucket.merge(date + "|" + brandId + ":" + clientId, column,
+                    (old, next) -> rank(next) <= rank(old) ? next : old);
             // Later days come later for a person, so a tie keeps the latest answer.
             bestOfPerson.merge(clientId, outcome, ClientRecordsService::better);
         }
+
+        bestInBucket.forEach((key, column) -> {
+            int[] point = perDay.get(key.substring(0, key.indexOf('|')));
+            if (point != null) point[column]++;
+        });
 
         int[] totals = new int[3];
         bestOfPerson.values().forEach(outcome -> {
@@ -337,19 +369,60 @@ public class ClientRecordsService {
             }
         });
         bestOfPersonAndBrand.values().forEach(outcome -> perBrand.get((Long) outcome[1])[(int) outcome[0]]++);
+        Map<String, int[]> perChannel = new LinkedHashMap<>();
+        bestOfPersonAndChannel.values().forEach(outcome ->
+                perChannel.computeIfAbsent((String) outcome[1], k -> new int[3])[(int) outcome[0]]++);
 
         List<ApplicationDtos.Day> daily = perDay.entrySet().stream()
                 .map(e -> new ApplicationDtos.Day(e.getKey(), e.getValue()[0], e.getValue()[1], e.getValue()[2]))
                 .toList();
+        // Brand rows get the funnel's columns too (2026-11-19). A picked brand is its only row.
+        Map<Long, int[]> stepsPerBrand = channels.perBrand(first, last, from, until, modes, onlyBrand, funnelView);
         List<ApplicationDtos.BrandCount> byBrand = allBrands.stream()
+                .filter(item -> onlyBrand == null || onlyBrand.equals(item.getId()))
                 .map(item -> {
                     int[] count = perBrand.get(item.getId());
-                    return new ApplicationDtos.BrandCount(item.getPublicId(), item.getName(), count[0], count[1], count[2]);
+                    int[] steps = stepsPerBrand.getOrDefault(item.getId(), new int[4]);
+                    return new ApplicationDtos.BrandCount(item.getPublicId(), item.getName(),
+                            steps[0], steps[1], steps[2], steps[3], count[0], count[1], count[2]);
                 })
                 .sorted(Comparator.comparingInt(ApplicationDtos.BrandCount::leads).reversed())
                 .toList();
-        return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, daily, byBrand,
-                channels.funnel(first, last, from, until, modes, onlyBrand, funnelView));
+
+        // Channel lines get leads, abandoned and failed: each person once per channel, best result.
+        ApplicationDtos.Funnel funnel = channels.funnel(first, last, from, until, modes, onlyBrand, funnelView);
+        List<ApplicationDtos.ChannelCount> lines = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        for (ApplicationDtos.ChannelCount line : funnel.channels()) {
+            int[] result = perChannel.getOrDefault(line.channel(), new int[3]);
+            seen.add(line.channel());
+            lines.add(new ApplicationDtos.ChannelCount(line.channel(), line.visitors(), line.step1(), line.step2(), line.step3(),
+                    result[0], result[1], result[2]));
+        }
+        perChannel.forEach((channel, result) -> {
+            if (!seen.contains(channel)) lines.add(new ApplicationDtos.ChannelCount(channel, 0, 0, 0, 0, result[0], result[1], result[2]));
+        });
+        funnel = new ApplicationDtos.Funnel(funnel.visitors(), funnel.step1(), funnel.step2(), funnel.step3(), lines,
+                funnel.view(), funnel.exactFrom());
+        return new ApplicationDtos.Overview(days, includeTest, totals[0], totals[1], totals[2], leadscout, size, daily, byBrand,
+                funnel);
+    }
+
+    private static String hourKey(LocalDate day, int hour) {
+        return day + (hour < 10 ? "T0" : "T") + hour;
+    }
+
+    /**
+     * "2026-11-19T14" → its chart point: the hour itself, its day, its 7-day
+     * block's first day, or its calendar month ("2026-11", added 2026-11-19).
+     */
+    private static String bucketOf(String hour, String size, LocalDate first) {
+        if (HOUR.equals(size)) return hour;
+        if (MONTH.equals(size)) return hour.substring(0, 7);
+        LocalDate day = LocalDate.parse(hour.substring(0, 10));
+        if (DAY.equals(size)) return day.toString();
+        long block = java.time.temporal.ChronoUnit.DAYS.between(first, day) / 7;
+        return first.plusDays(block * 7).toString();
     }
 
     /** The better of two outcomes {column, ...}: lead, then failed, then abandoned. A tie keeps the newer one. */

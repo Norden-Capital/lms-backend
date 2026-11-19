@@ -51,7 +51,10 @@ public enum ActionType {
     BRAND_UPDATED,
     BRAND_REMOVED,
     CHANNEL_ADDED,
+    /** Old entries only: channels are turned off, not removed, since 2026-11-18. */
     CHANNEL_REMOVED,
+    /** A channel's label changed, or it was turned on or off. */
+    CHANNEL_UPDATED,
     // ── Customers ─────────────────────────────────────────────────────────
     /** Someone downloaded the unsubscribe list as a CSV file. */
     UNSUBSCRIBES_EXPORTED

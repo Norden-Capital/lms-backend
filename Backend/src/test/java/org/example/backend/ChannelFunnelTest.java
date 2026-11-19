@@ -30,6 +30,7 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -173,6 +174,46 @@ class ChannelFunnelTest {
     }
 
     @Test
+    void channelAndBrandRowsShowTheSameSevenColumns() throws Exception {
+        String domain = newBrand();
+        newBrand(); // another brand, left out when one is picked
+
+        stepTwo(stepOne(domain, email("sold"), "email", null));   // lead
+        stepOne(domain, email("sold"), "email", null);            // abandoned
+        stepTwo(stepOne(domain, email("error"), "email", null));  // failed
+        String twice = email("sold");                             // abandoned, then lead: counts as a lead
+        stepOne(domain, twice, "email", null);
+        stepTwo(stepOne(domain, twice, "email", null));
+        stepTwo(stepOne(domain, email("sold"), null, null));      // SEO lead
+
+        JsonNode overview = json.readTree(mvc.perform(get("/api/applications/overview?days=7&includeTest=true&brand=" + brandId(domain))
+                        .with(user("staff").authorities(
+                                new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL),
+                                new SimpleGrantedAuthority("CUSTOMER:READ"))))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+
+        JsonNode email = line(overview.path("funnel"), "email");
+        assertThat(List.of(email.path("leads").asInt(), email.path("abandoned").asInt(), email.path("failed").asInt()))
+                .containsExactly(2, 1, 1);
+        JsonNode seo = line(overview.path("funnel"), "seo");
+        assertThat(List.of(seo.path("leads").asInt(), seo.path("abandoned").asInt(), seo.path("failed").asInt()))
+                .containsExactly(1, 0, 0);
+
+        // A picked brand is the only brand row, with the funnel's columns too.
+        JsonNode rows = overview.path("brands");
+        assertThat(rows.size()).isEqualTo(1);
+        JsonNode row = rows.get(0);
+        assertThat(row.path("id").asString()).isEqualTo(brandId(domain));
+        assertThat(List.of(row.path("step1").asInt(), row.path("step2").asInt(), row.path("step3").asInt()))
+                .containsExactly(5, 4, 3);
+        assertThat(row.path("visitors").asInt()).isGreaterThanOrEqualTo(5);
+        assertThat(List.of(row.path("leads").asInt(), row.path("abandoned").asInt(), row.path("failed").asInt()))
+                .containsExactly(3, 1, 1);
+        // The brand row and the funnel's totals agree.
+        assertThat(row.path("step1").asInt()).isEqualTo(overview.path("funnel").path("step1").asInt());
+    }
+
+    @Test
     void everyChannelWithALinkHasALineEvenWithNothingYet() throws Exception {
         JsonNode funnel = funnel(newBrand());
         assertThat(steps(line(funnel, "email"))).containsExactly(0, 0, 0, 0);
@@ -213,11 +254,19 @@ class ChannelFunnelTest {
                 new AuthPrincipal(null, "owner@example.com", "OWNER", null), null,
                 List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"),
                         new SimpleGrantedAuthority("CHANNEL_SETUP:READ"), new SimpleGrantedAuthority("CHANNEL_SETUP:CREATE"),
-                        new SimpleGrantedAuthority("CHANNEL_SETUP:DELETE"))));
+                        new SimpleGrantedAuthority("CHANNEL_SETUP:UPDATE"))));
         JsonNode applies = json.readTree(mvc.perform(get("/api/channels/applies").with(owner))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
-        assertThat(applies.path("email").path(brandId(domain)).asInt()).isEqualTo(2);
-        assertThat(applies.path("seo").path(brandId(domain)).asInt()).isEqualTo(1);
+        // [Q1, Q2, Q3, Q4] like Brand.applies: everything so far is in this quarter.
+        int quarter = (java.time.LocalDate.now(java.time.ZoneOffset.UTC).getMonthValue() - 1) / 3;
+        JsonNode email = applies.path("email").path(brandId(domain));
+        JsonNode seo = applies.path("seo").path(brandId(domain));
+        assertThat(email.size()).isEqualTo(4);
+        assertThat(email.get(quarter).asInt()).isEqualTo(2);
+        assertThat(seo.get(quarter).asInt()).isEqualTo(1);
+        int total = 0;
+        for (JsonNode count : email) total += count.asInt();
+        assertThat(total).isEqualTo(2);
     }
 
     @Test
@@ -239,8 +288,98 @@ class ChannelFunnelTest {
                 .content("{\"name\":\"sms\"}")).andExpect(status().isOk());
         mvc.perform(post("/api/channels").with(owner).contentType(MediaType.APPLICATION_JSON)
                 .content("{\"name\":\"sms\"}")).andExpect(status().isConflict());
-        mvc.perform(delete("/api/channels/sms").with(owner)).andExpect(status().isOk());
-        mvc.perform(delete("/api/channels/sms").with(owner)).andExpect(status().isNotFound());
+        // Channels are never deleted (2026-11-18): there is no DELETE any more.
+        mvc.perform(delete("/api/channels/sms").with(owner)).andExpect(status().is4xxClientError());
+        assertThat(db.queryForObject("SELECT count(*) FROM marketing_channels WHERE name = 'sms'", Integer.class)).isEqualTo(1);
+        // Editing needs CHANNEL_SETUP:UPDATE.
+        var reader = authentication(new UsernamePasswordAuthenticationToken(
+                new AuthPrincipal(null, "reader@example.com", "ADMIN", null), null,
+                List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("CHANNEL_SETUP:READ"))));
+        mvc.perform(patch("/api/channels/sms").with(reader).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")).andExpect(status().isForbidden());
+    }
+
+    private static final org.springframework.test.web.servlet.request.RequestPostProcessor OWNER = authentication(
+            new UsernamePasswordAuthenticationToken(
+                    new AuthPrincipal(null, "owner@example.com", "OWNER", null), null,
+                    List.of(new SimpleGrantedAuthority(JwtAuthenticationFilter.SESSION_FULL), new SimpleGrantedAuthority("ROLE_OWNER"),
+                            new SimpleGrantedAuthority("CHANNEL_SETUP:READ"), new SimpleGrantedAuthority("CHANNEL_SETUP:CREATE"),
+                            new SimpleGrantedAuthority("CHANNEL_SETUP:UPDATE"))));
+
+    private JsonNode channel(JsonNode list, String name) {
+        for (JsonNode c : list) if (c.path("name").asString().equals(name)) return c;
+        return null;
+    }
+
+    private JsonNode patchChannel(String name, String body, int status) throws Exception {
+        String answer = mvc.perform(patch("/api/channels/" + name).with(OWNER).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().is(status)).andReturn().getResponse().getContentAsString();
+        return status == 200 ? json.readTree(answer) : null;
+    }
+
+    @Test
+    void theListGivesEachChannelsLabelAndOnOffWithSeoLast() throws Exception {
+        String name = "tv" + UUID.randomUUID().toString().substring(0, 6);
+        JsonNode list = json.readTree(mvc.perform(post("/api/channels").with(OWNER).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\"}")).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        JsonNode added = channel(list, name);
+        assertThat(added.path("label").isNull()).isTrue();
+        assertThat(added.path("active").asBoolean()).isTrue();
+        assertThat(added.path("seo").asBoolean()).isFalse();
+        JsonNode last = list.get(list.size() - 1);
+        assertThat(last.path("name").asString()).isEqualTo("seo");
+        assertThat(last.path("seo").asBoolean()).isTrue();
+        assertThat(last.path("active").asBoolean()).isTrue();
+    }
+
+    @Test
+    void aChannelIsTurnedOffNotDeletedAndItsLabelCanChange() throws Exception {
+        String name = "tv" + UUID.randomUUID().toString().substring(0, 6);
+        mvc.perform(post("/api/channels").with(OWNER).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\"}")).andExpect(status().isOk());
+
+        JsonNode c = channel(patchChannel(name, "{\"label\":\"  TV Ads  \"}", 200), name);
+        assertThat(c.path("label").asString()).isEqualTo("TV Ads");
+        assertThat(c.path("active").asBoolean()).isTrue();
+
+        c = channel(patchChannel(name, "{\"active\":false}", 200), name);
+        assertThat(c.path("active").asBoolean()).isFalse();
+        assertThat(c.path("label").asString()).isEqualTo("TV Ads");
+
+        // Off but not gone: adding it again says so, and it still counts for the funnel.
+        mvc.perform(post("/api/channels").with(OWNER).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"" + name + "\"}")).andExpect(status().isConflict());
+        assertThat(line(funnel(newBrand()), name)).isNotNull();
+
+        // An empty label goes back to the tag.
+        c = channel(patchChannel(name, "{\"label\":\"\",\"active\":true}", 200), name);
+        assertThat(c.path("label").isNull()).isTrue();
+        assertThat(c.path("active").asBoolean()).isTrue();
+
+        // The tag itself can't change: a name in the body is ignored.
+        c = channel(patchChannel(name, "{\"name\":\"radio\"}", 200), name);
+        assertThat(c).isNotNull();
+
+        patchChannel(name, "{\"label\":\"" + "x".repeat(61) + "\"}", 400);
+        patchChannel(name, "{\"active\":\"no\"}", 400);
+        patchChannel("nosuchchannel", "{\"active\":false}", 404);
+
+        List<String> log = db.queryForList(
+                "SELECT details FROM action_logs WHERE action = 'CHANNEL_UPDATED' AND details LIKE ? ORDER BY id", String.class, name + ":%");
+        assertThat(log).containsExactly(
+                name + ": label (none) → \"TV Ads\"",
+                name + ": turned off",
+                name + ": label \"TV Ads\" → (none), turned on");
+    }
+
+    @Test
+    void seoCantBeChanged() throws Exception {
+        String answer = mvc.perform(patch("/api/channels/seo").with(OWNER).contentType(MediaType.APPLICATION_JSON)
+                .content("{\"active\":false}")).andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString();
+        assertThat(answer).contains("SEO can't be changed.");
+        patchChannel("seo", "{\"label\":\"Search\"}", 400);
+        patchChannel("seo", "{\"active\":true}", 400);
+        assertThat(db.queryForObject("SELECT label FROM marketing_channels WHERE name = 'seo'", String.class)).isEqualTo("SEO");
     }
 
     @Test

@@ -81,7 +81,9 @@ class OwnerPagesTest {
     @Test
     void theOwnerHoldsEveryOwnerPage() {
         assertThat(held(owner())).contains("BACKUP:DOWNLOAD", "BRAND:DELETE", "CHANNEL_SETUP:CREATE",
-                "SYSTEM_HEALTH:READ", "ACTION_LOG:READ");
+                "CHANNEL_SETUP:UPDATE", "SYSTEM_HEALTH:READ", "ACTION_LOG:READ");
+        // Channels are turned off, never deleted (V23).
+        assertThat(held(owner())).doesNotContain("CHANNEL_SETUP:DELETE");
     }
 
     @Test
