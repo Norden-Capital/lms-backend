@@ -190,11 +190,11 @@ public class LeadScoutClient {
         Object data = body.get("data");
         String email = data instanceof Map<?, ?> map ? String.valueOf(map.get("email")) : "";
         String name = email.toLowerCase(Locale.ROOT);
+        long started = System.nanoTime();
         java.util.regex.Matcher wait = java.util.regex.Pattern.compile("^wait([0-9]{1,3})-(.*)$").matcher(name);
         if (wait.matches()) {
             long seconds = Math.min(Integer.parseInt(wait.group(1)), FAKE_WAIT_MAX_SECONDS);
             name = wait.group(2);
-            long started = System.nanoTime();
             boolean tooLong = seconds * 1000 >= timeout.toMillis();
             try {
                 Thread.sleep(tooLong ? timeout.toMillis() : seconds * 1000);
@@ -222,7 +222,7 @@ public class LeadScoutClient {
         boolean hasLink = (Set.of("SOLD", "CPF", "NOT_SOLD").contains(status) || name.startsWith("existslink"))
                 && !name.startsWith("nolink");
         String link = hasLink ? ",\"redirectUrl\":\"" + FAKE_LINK + "\"" : "";
-        return read(200, "{\"fake\":true,\"status\":\"" + status + "\"" + link + "}", 0);
+        return read(200, "{\"fake\":true,\"status\":\"" + status + "\"" + link + "}", millisSince(started));
     }
 
     /** The closest amount LeadScout takes; a tie goes up. 4,000 becomes 2,500 and 5,000 becomes 7,500. */
