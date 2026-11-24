@@ -183,6 +183,43 @@ class LeadScoutClientTest {
 
         assertThat(result.status()).isNull();
         assertThat(result.tryAgain()).isFalse();
+        assertThat(result.timedOut()).isTrue();
+    }
+
+    @Test
+    void aSlowAnswerWithinTheTimeIsKept() {
+        delayMs = 1500;
+        LeadScoutClient client = client("test", "my-key", 3);
+
+        LeadScoutClient.Answer result = client.send(body(client), 1);
+
+        assertThat(result.status()).isEqualTo("SOLD");
+        assertThat(result.timedOut()).isFalse();
+        assertThat(result.durationMs()).isGreaterThanOrEqualTo(1500);
+    }
+
+    private Map<String, Object> fakeBody(LeadScoutClient client, String email) {
+        Map<String, Object> data = data();
+        data.put("email", email);
+        return client.body(data, Map.of(), "en", "1.2.3.4", "Test Browser");
+    }
+
+    @Test
+    void theFakeCanAnswerSlowlyAndTimeOutLikeLeadScout() {
+        LeadScoutClient client = client("fake", "", 2);
+
+        // Under the timeout: the answer comes, late.
+        LeadScoutClient.Answer slow = client.send(fakeBody(client, "wait1-sold@example.com"), 1);
+        assertThat(slow.status()).isEqualTo("SOLD");
+        assertThat(slow.redirectUrl()).isNotBlank();
+        assertThat(slow.durationMs()).isGreaterThanOrEqualTo(1000);
+
+        // At or over the timeout: a timeout, after the timeout, never sent again.
+        LeadScoutClient.Answer late = client.send(fakeBody(client, "wait3-sold@example.com"), 1);
+        assertThat(late.timedOut()).isTrue();
+        assertThat(late.tryAgain()).isFalse();
+        assertThat(late.durationMs()).isBetween(2000, 2900);
+        assertThat(received).isEmpty();
     }
 
     @Test

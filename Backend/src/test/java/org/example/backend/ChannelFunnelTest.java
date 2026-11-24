@@ -174,6 +174,16 @@ class ChannelFunnelTest {
     }
 
     @Test
+    void existsWithALinkCountsAsGotTheLink() throws Exception {
+        String domain = newBrand();
+        stepTwo(stepOne(domain, email("existslink"), "email", null)); // EXISTS + link: sent to it
+        stepTwo(stepOne(domain, email("exists"), "email", null));     // EXISTS, no link: "already applied"
+
+        assertThat(steps(line(funnel(domain), "email"))).containsExactly(2, 2, 2, 1);
+        assertThat(steps(line(funnel(domain, "tries"), "email")).get(3)).isEqualTo(1);
+    }
+
+    @Test
     void channelAndBrandRowsShowTheSameSevenColumns() throws Exception {
         String domain = newBrand();
         newBrand(); // another brand, left out when one is picked

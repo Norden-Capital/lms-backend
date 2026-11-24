@@ -50,6 +50,13 @@ class ApplyFlowTest {
     @Autowired BrandRepository brands;
     @Autowired BrandService brandService;
     @Autowired org.example.backend.service.EncryptionService encryption;
+    @Autowired org.example.backend.service.LeadScoutClient leadScout;
+
+    @Test
+    void leadScoutGetsFortyFiveSecondsToAnswer() {
+        // Owner, 2026-11-20: 45 s (was 20).
+        assertThat(leadScout.readTimeout()).isEqualTo(java.time.Duration.ofSeconds(45));
+    }
 
     /** Each test is its own visitor. */
     private String address;
@@ -175,6 +182,8 @@ class ApplyFlowTest {
             "cpf,     LEAD,   GO_TO_LINK,      1",
             "notsold, LEAD,   GO_TO_LINK,      1",
             "exists,  LEAD,   ALREADY_APPLIED, 1",
+            // Owner, 2026-11-24: EXISTS with LeadScout's link sends the person to it.
+            "existslink, LEAD, GO_TO_LINK,     1",
             "error,   FAILED, TRY_LATER,       2",
             "empty,   FAILED, TRY_LATER,       2",
             "down,    FAILED, TRY_LATER,       2",
@@ -190,10 +199,13 @@ class ApplyFlowTest {
         assertThat(statusOf(token)).isEqualTo(lmsStatus);
         assertThat(result.path("outcome").asString()).isEqualTo(outcome);
         assertThat(sendsOf(token)).isEqualTo(sends);
+        String saved = db.queryForObject("SELECT redirect_url FROM loan_applications WHERE step_token = ?", String.class, token);
         if ("GO_TO_LINK".equals(outcome)) {
             assertThat(result.path("redirectUrl").asString()).startsWith("https://");
+            assertThat(saved).isEqualTo(result.path("redirectUrl").asString());
         } else {
             assertThat(result.path("redirectUrl").isNull()).isTrue();
+            assertThat(saved).isNull();
         }
     }
 

@@ -53,12 +53,20 @@ public class ApplicationService {
             "aff_utm_source", "aff_utm_medium", "aff_utm_campaign", "aff_utm_content", "aff_utm_term");
     private static final int TRACKING_MAX_LENGTH = 200;
 
-    /** LeadScout's documentation: redirect on these, never on EXISTS, ERROR or empty. */
+    /**
+     * LeadScout's documentation: redirect on these, never on ERROR or empty. EXISTS
+     * redirects too when LeadScout gives a link (owner, 2026-11-24: the person goes to
+     * the link LeadScout gave); with no link it is the "already applied" page.
+     */
     private static final Set<String> SOLD_ONE_WAY_OR_ANOTHER = Set.of("SOLD", "CPF", "NOT_SOLD");
     private static final String EXISTS = "EXISTS";
 
     /** A send this old was cut off (a restart, a crash), so the person may press the button again. */
     private static final Duration SENDING_TOO_LONG = Duration.ofMinutes(5);
+    /** A retry needs at least this long to be worth it; with less left, the first answer stands. */
+    private static final Duration RETRY_AT_LEAST = Duration.ofSeconds(10);
+    /** Kept back from a retry's wait for reaching LeadScout (the 5 s connect limit). */
+    private static final Duration CONNECT_RESERVE = Duration.ofSeconds(5);
 
     private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() {
     };
@@ -159,19 +167,32 @@ public class ApplicationService {
         Sending sending = transaction.execute(status -> startSending(token, form));
         if (sending.done != null) return sending.done;
 
+        // Owner, 2026-11-20: one step 2 waits about 45 s in all, so the form's server
+        // (55 s, Vercel 60 s) always gets the answer. The one safe retry happens only
+        // when enough time is left, and it gets only what is left.
+        Instant started = Instant.now();
         LeadScoutClient.Answer answer = leadScout.send(sending.body, 1);
         List<LeadScoutClient.Answer> answers = new ArrayList<>(List.of(answer));
         if (answer.tryAgain()) {
             pause();
-            answer = leadScout.send(sending.body, 2);
-            answers.add(answer);
+            Duration left = leadScout.readTimeout().minus(Duration.between(started, Instant.now())).minus(CONNECT_RESERVE);
+            if (left.compareTo(RETRY_AT_LEAST) >= 0) {
+                answer = leadScout.send(sending.body, 2, left);
+                answers.add(answer);
+            } else {
+                log.warn("No time left to send {} to LeadScout again", sending.publicId());
+            }
         }
 
+        if (answer.timedOut()) {
+            // The public id only: no name, email or phone in the log.
+            log.warn("LeadScout gave no answer within {}s for {}", leadScout.readTimeout().toSeconds(), sending.publicId());
+        }
         LeadScoutClient.Answer last = answer;
         return transaction.execute(status -> saveAnswer(sending.applicationId, sending.body, answers, last));
     }
 
-    private record Sending(Long applicationId, Map<String, Object> body, StepTwoResult done) {
+    private record Sending(Long applicationId, String publicId, Map<String, Object> body, StepTwoResult done) {
     }
 
     private Sending startSending(String token, ApplyDtos.StepTwo form) {
@@ -180,7 +201,7 @@ public class ApplicationService {
 
         // A second click after the answer: the same answer, and no second send.
         if (application.getStatus() == ApplicationStatus.LEAD) {
-            return new Sending(application.getId(), null, resultFor(application));
+            return new Sending(application.getId(), application.getPublicId(), null, resultFor(application));
         }
         if (application.getStatus() == ApplicationStatus.SENDING
                 && application.getUpdatedAt().isAfter(Instant.now().minus(SENDING_TOO_LONG))) {
@@ -209,7 +230,7 @@ public class ApplicationService {
 
         Map<String, Object> body = leadScout.body(data, extra, application.getLanguage(),
                 String.valueOf(stored.get("ip")), String.valueOf(stored.get("userAgent")));
-        return new Sending(application.getId(), body, null);
+        return new Sending(application.getId(), application.getPublicId(), body, null);
     }
 
     private StepTwoResult saveAnswer(Long applicationId, Map<String, Object> body,
@@ -231,7 +252,7 @@ public class ApplicationService {
 
         boolean exists = EXISTS.equals(last.status());
         boolean sold = last.status() != null && SOLD_ONE_WAY_OR_ANOTHER.contains(last.status());
-        String link = sold ? safeLink(last.redirectUrl()) : null;
+        String link = sold || exists ? safeLink(last.redirectUrl()) : null;
 
         application.setLeadscoutStatus(last.status());
         application.setRedirectUrl(link);

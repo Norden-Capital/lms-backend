@@ -25,7 +25,7 @@ import java.util.Set;
  * <ul>
  *   <li>{@code fake} (the default): nothing leaves this server. The answer comes
  *       from the start of the email, so every case can be tried, like
- *       {@code exists@example.com}.</li>
+ *       {@code exists@example.com} ("existslink@…" answers EXISTS with a link).</li>
  *   <li>{@code test}: LeadScout itself, with {@code test: true} and the test email
  *       and phone its documentation asks for, so no real person's details leave.</li>
  *   <li>{@code live}: the real thing.</li>
@@ -46,6 +46,9 @@ public class LeadScoutClient {
     /** The only debt amounts LeadScout takes. Changed 2026-11-09. */
     private static final int[] DEBT_AMOUNTS = {0, 2500, 7500, 10000, 15000, 20000};
     private static final String FAKE_LINK = "https://example.com/fake-offer";
+    private static final String TOO_LONG = "LeadScout took too long to answer.";
+    /** The fake waits at most this long ("wait40-…"), so a typo can't hold a thread for hours. */
+    private static final int FAKE_WAIT_MAX_SECONDS = 120;
 
     /**
      * What came back.
@@ -56,6 +59,11 @@ public class LeadScoutClient {
      */
     public record Answer(Integer httpStatus, String status, String redirectUrl, String body,
                          String problem, boolean tryAgain, int durationMs) {
+
+        /** LeadScout did not answer in time (read timeout). Never sent again. */
+        public boolean timedOut() {
+            return httpStatus == null && TOO_LONG.equals(problem);
+        }
     }
 
     private final String mode;
@@ -68,7 +76,7 @@ public class LeadScoutClient {
     public LeadScoutClient(@Value("${app.leadscout.mode:fake}") String mode,
                            @Value("${app.leadscout.url:https://app.leadscout.ca/api/v1/public/submit}") String url,
                            @Value("${app.leadscout.api-key:}") String apiKey,
-                           @Value("${app.leadscout.read-timeout-seconds:20}") long readTimeoutSeconds,
+                           @Value("${app.leadscout.read-timeout-seconds:45}") long readTimeoutSeconds,
                            ObjectMapper objectMapper) {
         // A typo must stop the server, not quietly send real people's details somewhere.
         if (!Set.of(FAKE, TEST, LIVE).contains(mode)) {
@@ -80,11 +88,16 @@ public class LeadScoutClient {
         this.readTimeout = Duration.ofSeconds(readTimeoutSeconds);
         this.objectMapper = objectMapper;
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-        log.info("LeadScout mode: {}", mode);
+        log.info("LeadScout mode: {}, waits up to {}s for an answer", mode, readTimeoutSeconds);
     }
 
     public String mode() {
         return mode;
+    }
+
+    /** How long a send waits for LeadScout's answer. Owner, 2026-11-20: 45 seconds (was 20). */
+    public Duration readTimeout() {
+        return readTimeout;
     }
 
     /** The body for LeadScout: everything but live is marked as a test, and test mode hides the person. */
@@ -112,10 +125,15 @@ public class LeadScoutClient {
 
     /** @param attempt 1 for the first send, 2 for the one retry */
     public Answer send(Map<String, Object> body, int attempt) {
-        return FAKE.equals(mode) ? fakeAnswer(body, attempt) : realAnswer(body);
+        return send(body, attempt, readTimeout);
     }
 
-    private Answer realAnswer(Map<String, Object> body) {
+    /** @param timeout how long this one send may wait for the answer (a retry gets only what is left) */
+    public Answer send(Map<String, Object> body, int attempt, Duration timeout) {
+        return FAKE.equals(mode) ? fakeAnswer(body, attempt, timeout) : realAnswer(body, timeout);
+    }
+
+    private Answer realAnswer(Map<String, Object> body, Duration timeout) {
         if (apiKey.isEmpty()) {
             log.error("LeadScout mode is {} but no API key is set (LEADSCOUT_API_KEY)", mode);
             return new Answer(null, null, null, null, "No LeadScout API key is set.", false, 0);
@@ -123,7 +141,7 @@ public class LeadScoutClient {
         long started = System.nanoTime();
         try {
             HttpRequest request = HttpRequest.newBuilder(url)
-                    .timeout(readTimeout)
+                    .timeout(timeout)
                     .header("Content-Type", "application/json")
                     .header("x-api-key", apiKey)
                     .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(body)))
@@ -134,7 +152,7 @@ public class LeadScoutClient {
             // Never reached LeadScout, so nothing was taken and one more try is safe.
             return new Answer(null, null, null, null, "Could not reach LeadScout.", true, millisSince(started));
         } catch (HttpTimeoutException e) {
-            return new Answer(null, null, null, null, "LeadScout took too long to answer.", false, millisSince(started));
+            return new Answer(null, null, null, null, TOO_LONG, false, millisSince(started));
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             return new Answer(null, null, null, null, "Stopped while waiting for LeadScout.", false, millisSince(started));
@@ -163,13 +181,31 @@ public class LeadScoutClient {
         return new Answer(httpStatus, status, redirectUrl, text, problem, !understood, duration);
     }
 
-    /** For trying every case with no key and no network. "flaky" fails once, then works. */
-    private Answer fakeAnswer(Map<String, Object> body, int attempt) {
+    /**
+     * For trying every case with no key and no network. "flaky" fails once, then works.
+     * "wait40-sold@…" answers after 40 seconds, like a slow LeadScout (2026-11-20); a
+     * wait at or over the read timeout ends as a timeout, after the timeout. Fake mode only.
+     */
+    private Answer fakeAnswer(Map<String, Object> body, int attempt, Duration timeout) {
         Object data = body.get("data");
         String email = data instanceof Map<?, ?> map ? String.valueOf(map.get("email")) : "";
         String name = email.toLowerCase(Locale.ROOT);
+        java.util.regex.Matcher wait = java.util.regex.Pattern.compile("^wait([0-9]{1,3})-(.*)$").matcher(name);
+        if (wait.matches()) {
+            long seconds = Math.min(Integer.parseInt(wait.group(1)), FAKE_WAIT_MAX_SECONDS);
+            name = wait.group(2);
+            long started = System.nanoTime();
+            boolean tooLong = seconds * 1000 >= timeout.toMillis();
+            try {
+                Thread.sleep(tooLong ? timeout.toMillis() : seconds * 1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return new Answer(null, null, null, null, "Stopped while waiting for LeadScout.", false, millisSince(started));
+            }
+            if (tooLong) return new Answer(null, null, null, null, TOO_LONG, false, millisSince(started));
+        }
         if (name.startsWith("timeout")) {
-            return new Answer(null, null, null, null, "LeadScout took too long to answer.", false, 0);
+            return new Answer(null, null, null, null, TOO_LONG, false, 0);
         }
         if (name.startsWith("down")) {
             return new Answer(null, null, null, null, "Could not reach LeadScout.", true, 0);
@@ -183,7 +219,8 @@ public class LeadScoutClient {
                 : name.startsWith("error") ? "ERROR"
                 : name.startsWith("empty") ? ""
                 : "SOLD";
-        boolean hasLink = Set.of("SOLD", "CPF", "NOT_SOLD").contains(status) && !name.startsWith("nolink");
+        boolean hasLink = (Set.of("SOLD", "CPF", "NOT_SOLD").contains(status) || name.startsWith("existslink"))
+                && !name.startsWith("nolink");
         String link = hasLink ? ",\"redirectUrl\":\"" + FAKE_LINK + "\"" : "";
         return read(200, "{\"fake\":true,\"status\":\"" + status + "\"" + link + "}", 0);
     }
