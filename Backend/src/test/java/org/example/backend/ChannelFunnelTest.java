@@ -184,6 +184,15 @@ class ChannelFunnelTest {
     }
 
     @Test
+    void ibvPreStartCountsAsGotTheLink() throws Exception {
+        String domain = newBrand();
+        stepTwo(stepOne(domain, email("ibv"), "email", null)); // IBV_PRE_START + link: a lead, sent to it
+
+        assertThat(steps(line(funnel(domain), "email"))).containsExactly(1, 1, 1, 1);
+        assertThat(steps(line(funnel(domain, "tries"), "email")).get(3)).isEqualTo(1);
+    }
+
+    @Test
     void channelAndBrandRowsShowTheSameSevenColumns() throws Exception {
         String domain = newBrand();
         newBrand(); // another brand, left out when one is picked

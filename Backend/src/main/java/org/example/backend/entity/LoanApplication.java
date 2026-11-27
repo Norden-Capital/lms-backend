@@ -64,7 +64,7 @@ public class LoanApplication {
     @Column(name = "consent_at", nullable = false)
     private Instant consentAt;
 
-    /** LeadScout's last answer: SOLD, CPF, NOT_SOLD, EXISTS, ERROR. Null until it answers. */
+    /** LeadScout's last answer: SOLD, CPF, NOT_SOLD, IBV_PRE_START, EXISTS, ERROR. Null until it answers. */
     @Column(name = "leadscout_status", length = 20)
     private String leadscoutStatus;
 

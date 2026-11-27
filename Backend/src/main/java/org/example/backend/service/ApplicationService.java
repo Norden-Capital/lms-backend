@@ -57,8 +57,9 @@ public class ApplicationService {
      * LeadScout's documentation: redirect on these, never on ERROR or empty. EXISTS
      * redirects too when LeadScout gives a link (owner, 2026-11-24: the person goes to
      * the link LeadScout gave); with no link it is the "already applied" page.
+ * IBV_PRE_START is a lead too (owner, 2026-11-27): LeadScout took it and gives a link.
      */
-    private static final Set<String> SOLD_ONE_WAY_OR_ANOTHER = Set.of("SOLD", "CPF", "NOT_SOLD");
+    private static final Set<String> SOLD_ONE_WAY_OR_ANOTHER = Set.of("SOLD", "CPF", "NOT_SOLD", "IBV_PRE_START");
     private static final String EXISTS = "EXISTS";
 
     /** A send this old was cut off (a restart, a crash), so the person may press the button again. */

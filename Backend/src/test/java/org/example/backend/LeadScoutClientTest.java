@@ -96,6 +96,22 @@ class LeadScoutClientTest {
     }
 
     @Test
+    void ibvPreStartWithHttp201IsUnderstood() {
+        // What LeadScout sent for 5 live leads on 2026-11-27.
+        answerCode = 201;
+        answer = "{\"redirectUrl\":\"https://app.leadscout.ca/l/abc\",\"status\":\"IBV_PRE_START\"}";
+        LeadScoutClient client = client("live", "my-key", 5);
+
+        LeadScoutClient.Answer result = client.send(body(client), 1);
+
+        assertThat(result.httpStatus()).isEqualTo(201);
+        assertThat(result.status()).isEqualTo("IBV_PRE_START");
+        assertThat(result.redirectUrl()).isEqualTo("https://app.leadscout.ca/l/abc");
+        assertThat(result.problem()).isNull();
+        assertThat(result.tryAgain()).isFalse();
+    }
+
+    @Test
     void debtIsSentAsOneOfLeadScoutsAmounts() {
         LeadScoutClient client = client("test", "my-key", 5);
         Map<String, Object> data = data();

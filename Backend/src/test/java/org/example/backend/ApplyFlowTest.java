@@ -184,6 +184,8 @@ class ApplyFlowTest {
             "exists,  LEAD,   ALREADY_APPLIED, 1",
             // Owner, 2026-11-24: EXISTS with LeadScout's link sends the person to it.
             "existslink, LEAD, GO_TO_LINK,     1",
+            // Owner, 2026-11-27: IBV_PRE_START is a lead with a link, like SOLD.
+            "ibv,     LEAD,   GO_TO_LINK,      1",
             "error,   FAILED, TRY_LATER,       2",
             "empty,   FAILED, TRY_LATER,       2",
             "down,    FAILED, TRY_LATER,       2",
@@ -207,6 +209,18 @@ class ApplyFlowTest {
             assertThat(result.path("redirectUrl").isNull()).isTrue();
             assertThat(saved).isNull();
         }
+    }
+
+    @Test
+    void ibvPreStartKeepsLeadScoutsOwnWord() throws Exception {
+        String token = startApplication(email("ibv"));
+
+        JsonNode result = finish(token);
+
+        assertThat(result.path("outcome").asString()).isEqualTo("GO_TO_LINK");
+        assertThat(statusOf(token)).isEqualTo("LEAD");
+        assertThat(db.queryForObject("SELECT leadscout_status FROM loan_applications WHERE step_token = ?", String.class, token))
+                .isEqualTo("IBV_PRE_START");
     }
 
     @Test

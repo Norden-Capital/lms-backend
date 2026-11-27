@@ -12,7 +12,7 @@ public enum ApplicationStatus {
     /** Step 2 is finished and LeadScout has not answered yet. */
     SENDING,
 
-    /** LeadScout took it: SOLD, CPF, NOT_SOLD or EXISTS. */
+    /** LeadScout took it: SOLD, CPF, NOT_SOLD, IBV_PRE_START or EXISTS. */
     LEAD,
 
     /** LeadScout refused it, gave no usable answer, or could not be reached. */

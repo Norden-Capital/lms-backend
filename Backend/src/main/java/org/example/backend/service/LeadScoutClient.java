@@ -25,7 +25,8 @@ import java.util.Set;
  * <ul>
  *   <li>{@code fake} (the default): nothing leaves this server. The answer comes
  *       from the start of the email, so every case can be tried, like
- *       {@code exists@example.com} ("existslink@…" answers EXISTS with a link).</li>
+ *       {@code exists@example.com} ("existslink@…" answers EXISTS with a link,
+ *       "ibv@…" answers IBV_PRE_START with a link).</li>
  *   <li>{@code test}: LeadScout itself, with {@code test: true} and the test email
  *       and phone its documentation asks for, so no real person's details leave.</li>
  *   <li>{@code live}: the real thing.</li>
@@ -215,11 +216,12 @@ public class LeadScoutClient {
         }
         String status = name.startsWith("cpf") ? "CPF"
                 : name.startsWith("notsold") ? "NOT_SOLD"
+                : name.startsWith("ibv") ? "IBV_PRE_START"
                 : name.startsWith("exists") ? "EXISTS"
                 : name.startsWith("error") ? "ERROR"
                 : name.startsWith("empty") ? ""
                 : "SOLD";
-        boolean hasLink = (Set.of("SOLD", "CPF", "NOT_SOLD").contains(status) || name.startsWith("existslink"))
+        boolean hasLink = (Set.of("SOLD", "CPF", "NOT_SOLD", "IBV_PRE_START").contains(status) || name.startsWith("existslink"))
                 && !name.startsWith("nolink");
         String link = hasLink ? ",\"redirectUrl\":\"" + FAKE_LINK + "\"" : "";
         return read(200, "{\"fake\":true,\"status\":\"" + status + "\"" + link + "}", millisSince(started));
